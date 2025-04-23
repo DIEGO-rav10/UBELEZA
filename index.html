@@ -50,6 +50,10 @@
             --white: #fff;
             --overlay-color: rgba(0, 0, 0, 0.7);
             --icon-color: var(--text-color-medium);
+
+            /* Cores solicitadas */
+            --total-color: #B5E61D; /* Verde Lima */
+            --average-color: #FF7F27; /* Laranja */
         }
 
         *, *::before, *::after { box-sizing: border-box; }
@@ -110,7 +114,7 @@
         .input-group-row .input-wrapper { flex: 1; min-width: 130px; }
         .label-with-edit { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
         .label-with-edit label { margin-bottom: 0; }
-        .input-group label, .total-input-display label, .input-group-row label {
+        .input-group label, .input-wrapper label, .input-group-row label, .races-display label { /* Adicionado .races-display label */
             font-weight: 500;
             color: var(--text-color-medium);
             font-size: 0.9em;
@@ -145,62 +149,94 @@
         }
         input::placeholder { color: var(--text-color-disabled); }
 
-        .total-input-display { display: flex; align-items: stretch; gap: 20px; margin-bottom: 25px; flex-wrap: wrap; }
-        .total-input-display .input-wrapper { flex: 1; min-width: 180px; }
-
-        /* --- Grid de Resumo do Período (Ajustado para Legibilidade) --- */
-        .period-summary-grid {
-            flex-grow: 1;
+        /* --- Área de Ganhos Atualizados --- */
+        .total-input-display {
             display: flex;
-            justify-content: space-around;
-            align-items: stretch; /* Garante que as colunas tenham a mesma altura */
+            gap: 15px; /* Espaçamento entre input, corridas e botão */
+            margin-bottom: 20px; /* Espaço abaixo desta linha */
+            align-items: flex-end; /* Alinha a base dos elementos */
+            flex-wrap: wrap; /* Permite quebrar linha em telas menores */
+        }
+        .total-input-display .input-wrapper {
+            flex: 1; /* Input ocupa espaço disponível */
+            min-width: 150px; /* Largura mínima para o input */
+        }
+        .total-input-display .races-display {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 10px 15px;
+            background-color: var(--bg-dark-tertiary);
+            border-radius: var(--border-radius);
+            border: 1px solid var(--border-color-light);
+            min-width: 100px; /* Largura mínima */
+            text-align: center;
+            margin-bottom: 4px; /* Ajuste fino de alinhamento com input/button */
+        }
+        .races-display label {
+             margin-bottom: 3px; /* Menos espaço abaixo do label */
+             font-size: 0.8em; /* Label menor */
+             text-transform: uppercase;
+             color: var(--text-color-medium);
+             line-height: 1.2;
+        }
+        .races-display .summary-value {
+            font-size: 1.9em; /* Valor das corridas maior */
+            font-weight: 700;
+            color: var(--text-color-light);
+            line-height: 1.1;
+        }
+        /* Ajuste no botão quando dentro do flex container */
+        .total-input-display #add-total-earning-btn {
+            width: auto; /* Largura automática */
+            margin-top: 0; /* Remove margem superior padrão */
+            flex-shrink: 0; /* Não encolher */
+            padding: 14px 18px; /* Ajuste padding se necessário */
+        }
+
+        /* --- Novo container para Total e Média --- */
+        .period-summary-inline {
+            display: flex;
+            justify-content: space-around; /* Espaça Total e Média */
+            align-items: center;
             background: var(--glass-bg);
             backdrop-filter: blur(10px);
             -webkit-backdrop-filter: blur(10px);
             border: 1px solid var(--border-color-light);
-            padding: 15px 10px;
+            padding: 20px 15px; /* Mais padding vertical */
             border-radius: var(--border-radius);
             text-align: center;
-            min-height: 90px; /* Aumentar altura para espaçamento vertical */
-            height: auto;
+            margin-top: 10px; /* Espaço acima */
+            margin-bottom: 25px; /* Espaço abaixo antes do botão (se botão não estiver na linha) */
         }
-        .summary-column {
-            flex: 1; /* Distribuição inicial igual */
-            padding: 10px 8px; /* Ajustar padding */
+        .summary-item {
             display: flex;
             flex-direction: column;
-            justify-content: center;
             align-items: center;
-            border-right: 1px solid var(--border-color-light);
-            min-width: 80px; /* Manter largura mínima */
-            overflow: hidden; /* Evitar que conteúdo vaze */
         }
-        .summary-column:first-child {
-             flex: 1.5; /* Dar mais espaço inicial para a coluna TOTAL */
-        }
-        .summary-column:last-child { border-right: none; }
-        .summary-column .summary-label {
-            font-size: 0.85em; /* Tamanho do label */
-            color: var(--text-color-summary-label); /* Cor do label */
+        .summary-item .summary-label {
+            font-size: 0.9em;
+            color: var(--text-color-summary-label);
             line-height: 1.3;
-            font-weight: 500; /* Peso do label */
-            margin-bottom: 8px; /* Espaço abaixo do label */
+            font-weight: 500;
+            margin-bottom: 8px;
             text-transform: uppercase;
-            text-shadow: none; /* Sem sombra no label */
         }
-        .summary-column .summary-value {
-            font-size: 1.8em; /* Tamanho GRANDE do valor */
-            color: var(--text-color-light); /* Cor BRANCA do valor */
-            line-height: 1.1; /* Ajustar linha para fontes grandes */
+        .summary-item .summary-value {
+            font-size: 2.1em; /* Valores grandes */
+            line-height: 1.1;
             font-weight: 700;
-            word-break: break-all; /* Permitir quebra se necessário (fallback) */
-            text-shadow: none; /* Remover sombra/brilho */
-            white-space: nowrap; /* Garantir que não quebre linha */
-            overflow: hidden; /* Esconder se estourar */
-            text-overflow: ellipsis; /* Adicionar '...' se estourar */
-            width: 100%; /* Ocupar toda a largura da coluna */
+            white-space: nowrap;
         }
-        /* --- Fim Grid de Resumo --- */
+        /* Cores específicas aplicadas via ID */
+        #period-earnings-display {
+            color: var(--total-color); /* Verde Lima */
+        }
+        #period-average-display {
+            color: var(--average-color); /* Laranja */
+        }
+        /* --- Fim Ganhos Atualizados --- */
+
 
         button {
             display: inline-flex; align-items: center; justify-content: center; gap: 10px;
@@ -214,7 +250,7 @@
             font-weight: 600;
             margin-top: 15px;
             box-shadow: var(--box-shadow-light);
-            width: 100%;
+            width: 100%; /* Padrão largura total */
             position: relative;
             background-color: var(--primary-color);
         }
@@ -479,29 +515,30 @@
              h1 { font-size: 1.9em; } h2 { font-size: 1.4em; margin-bottom: 25px; } h3 { font-size: 1.15em; }
              .main-container { flex-direction: column; gap: 25px; }
              .column { padding: 25px; min-width: unset; width: 100%;}
-             .total-input-display { flex-direction: column; align-items: stretch; }
-             .total-input-display .input-wrapper { margin-bottom: 15px; }
-             .period-summary-grid { width: 100%; margin-top: 10px; flex-wrap: wrap; padding: 10px 5px; min-height: unset;} /* Ajustar altura mínima e padding */
-             .summary-column {
-                min-width: calc(33.33% - 10px); /* Tentar dividir em 3 colunas */
-                padding: 10px 5px; /* Menos padding lateral */
-                border-right: none; /* Remover borda direita */
-                border-bottom: 1px solid var(--border-color-light); /* Adicionar borda inferior */
-                margin-bottom: 10px; /* Espaço entre linhas */
-                flex-basis: 30%; /* Base flexível */
-                flex-grow: 1; /* Permitir crescer */
+             /* Ajuste para a linha de input/corridas/botão */
+             .total-input-display { flex-direction: column; align-items: stretch; gap: 15px; }
+             .total-input-display .input-wrapper,
+             .total-input-display .races-display {
+                 width: 100%; /* Ocupa toda largura */
              }
-             .summary-column:last-child {
-                 border-bottom: none; /* Remover borda inferior do último */
-                 margin-bottom: 0;
+             .total-input-display #add-total-earning-btn {
+                 width: 100%; /* Botão ocupa toda largura */
+                 margin-top: 5px; /* Pequeno espaço acima do botão */
              }
-             .summary-column .summary-label { font-size: 0.8em; margin-bottom: 5px; } /* Ajustar tamanho e margem do label */
-             .summary-column .summary-value { font-size: 1.6em; line-height: 1.2; } /* Ajustar tamanho e linha do valor */
+             .races-display .summary-value { font-size: 1.8em; } /* Leve redução se necessário */
+             /* Ajuste para a linha Total/Média */
+             .period-summary-inline {
+                 flex-direction: column; /* Empilha Total e Média */
+                 gap: 15px; /* Espaço entre eles */
+                 padding: 15px;
+             }
+             .summary-item .summary-value { font-size: 1.9em; } /* Redução se necessário */
+
              #archived-list { grid-template-columns: 1fr; gap: 20px; }
              .archive-item-content { padding: 20px; }
              .modal-content { width: 95%; margin: 5% auto; padding: 25px; }
              .close-button { top: 15px; right: 20px; font-size: 32px; }
-             button { padding: 15px 20px; }
+             button { padding: 15px 20px; } /* Padding geral dos botões */
              #reset-app-btn { width: 100%; padding: 14px 18px; }
              .input-group-row { flex-direction: column; gap: 15px; }
              [data-tooltip]:not(#add-total-earning-btn)::after { white-space: normal; width: 150px; }
@@ -512,8 +549,9 @@
          }
          /* Ajuste fino para telas muito pequenas se necessário */
         @media (max-width: 400px) {
-            .summary-column .summary-value { font-size: 1.5em; }
-            .summary-column .summary-label { font-size: 0.75em; }
+             .summary-item .summary-value { font-size: 1.7em; }
+             .summary-item .summary-label { font-size: 0.8em; }
+             .races-display .summary-value { font-size: 1.6em; }
         }
 
     </style>
@@ -523,31 +561,37 @@
     <h1><i class="fa-solid fa-calculator"></i> Ubeleza Calculadora <span class="version">v4.20.5</span></h1>
 
     <div class="main-container">
-        <!-- Coluna de Ganhos -->
+        <!-- Coluna de Ganhos (Reorganizada) -->
         <div class="column ganhos">
              <h2><i class="fa-solid fa-hand-holding-dollar"></i> Ganhos (Período Atual)</h2>
+
+             <!-- Linha com Input de Ganhos, Contagem de Corridas e Botão -->
              <div class="total-input-display">
                  <div class="input-wrapper">
-                     <label for="earning-total-input">Total Ganhos (Período Atual R$):</label>
+                     <label for="earning-total-input">Ganhos Atual R$:</label>
                      <input type="number" id="earning-total-input" placeholder="Ex: 0,00" step="0.01" disabled>
                  </div>
-                 <!-- Grid de Resumo -->
-                 <div class="period-summary-grid">
-                     <div class="summary-column">
-                         <span class="summary-label">Total</span>
-                         <span class="summary-value" id="period-earnings-display">R$ 0,00</span>
-                     </div>
-                     <div class="summary-column">
-                         <span class="summary-label">Corridas</span>
-                         <span class="summary-value" id="period-race-count-display">0</span>
-                     </div>
-                     <div class="summary-column">
-                         <span class="summary-label">Média</span>
-                         <span class="summary-value" id="period-average-display">R$ 0,00</span>
-                     </div>
+                 <div class="races-display">
+                     <label>Corridas</label>
+                     <span class="summary-value" id="period-race-count-display">0</span>
+                 </div>
+                  <!-- Botão movido para esta linha -->
+                 <button id="add-total-earning-btn" disabled><i class="fa-solid fa-plus"></i> Atualizar Total (Período)</button>
+             </div>
+
+             <!-- Linha com Total e Média -->
+             <div class="period-summary-inline">
+                 <div class="summary-item">
+                     <span class="summary-label">Total</span>
+                     <span class="summary-value" id="period-earnings-display">R$ 0,00</span>
+                 </div>
+                 <div class="summary-item">
+                     <span class="summary-label">Média</span>
+                     <span class="summary-value" id="period-average-display">R$ 0,00</span>
                  </div>
              </div>
-             <button id="add-total-earning-btn" disabled><i class="fa-solid fa-plus"></i> Atualizar Total (Período)</button>
+
+             <!-- Mensagem de erro e Controles do Histórico permanecem iguais -->
              <p id="gas-required-earning" class="message gas-required-message" style="display: none;"><i class="fa-solid fa-triangle-exclamation"></i> Inicie um novo ciclo para adicionar ganhos.</p>
 
             <div class="history-controls">
@@ -563,7 +607,7 @@
             </table>
         </div>
 
-        <!-- Coluna de Ciclo Atual -->
+        <!-- Coluna de Ciclo Atual (sem alterações nesta parte) -->
         <div class="column gasolina">
             <h2 style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
                  <span><i class="fa-solid fa-tachometer-alt"></i> Ciclo Atual</span>
@@ -671,14 +715,17 @@
         </div>
     </div>
 
+    <!-- Seção Arquivada (sem alterações) -->
     <div class="archived-section">
         <h2><i class="fa-solid fa-book"></i> Histórico Arquivado</h2>
         <div id="archived-chart-container" style="display: none;"> <canvas id="archivedStatsChart"></canvas> </div>
         <div id="archived-list"> <p id="no-archives-message" style="display: none;">Nenhum período arquivado ainda.</p> </div>
     </div>
 
+     <!-- Botão Reset (sem alterações) -->
      <div class="reset-section"> <button id="reset-app-btn" data-tooltip="Apaga TODOS os dados salvos!"><i class="fa-solid fa-bomb"></i> Zerar Todos os Dados</button> </div>
 
+    <!-- Modal (sem alterações) -->
     <div id="archive-details-modal" class="modal">
         <div class="modal-content">
             <span class="close-button" id="modal-close-btn" data-tooltip="Fechar">×</span>
@@ -709,6 +756,7 @@
 
     <script>
         document.addEventListener('DOMContentLoaded', () => {
+            // Seletores de elementos (permanecem os mesmos, pois os IDs não mudaram)
             const earningTotalInput = document.getElementById('earning-total-input');
             const addTotalEarningBtn = document.getElementById('add-total-earning-btn');
             const periodEarningsDisplaySpan = document.getElementById('period-earnings-display');
@@ -764,6 +812,7 @@
             const toggleCycleContentBtn = document.getElementById('toggle-cycle-content-btn');
             const cycleContentWrapper = document.getElementById('cycle-content-wrapper');
 
+            // Variáveis e Constantes (sem alterações)
             const storagePrefix = 'v4.20.5_'; // Incrementa versão
             let currentGasCost = parseFloat(localStorage.getItem(storagePrefix + 'currentGasCost')) || 0;
             let cumulativeCycleEarnings = parseFloat(localStorage.getItem(storagePrefix + 'cumulativeCycleEarnings')) || 0;
@@ -795,6 +844,7 @@
                 border: '#1c1c1e'
             };
 
+            // Funções (sem alterações na lógica principal, apenas as que manipulam a UI continuarão funcionando)
             function formatCurrency(value) { if (typeof value !== 'number' || isNaN(value)) return 'R$ 0,00'; return value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }); }
             function formatNumber(value, decimals = 2) { if (typeof value !== 'number' || isNaN(value)) return 'N/A'; return value.toLocaleString('pt-BR', { minimumFractionDigits: decimals, maximumFractionDigits: decimals }); }
             function formatDateTime(dateObjOrStr, includeTime = true) { try { const date = dateObjOrStr instanceof Date ? dateObjOrStr : new Date(dateObjOrStr); if (isNaN(date.getTime())) return dateObjOrStr; const day = String(date.getDate()).padStart(2, '0'); const month = String(date.getMonth() + 1).padStart(2, '0'); const year = String(date.getFullYear()).slice(-2); if (!includeTime) return `${day}/${month}/${year}`; const hours = String(date.getHours()).padStart(2, '0'); const minutes = String(date.getMinutes()).padStart(2, '0'); return `${day}/${month}/${year} ${hours}:${minutes}`; } catch (e) { console.error("Erro formatando data:", dateObjOrStr, e); return dateObjOrStr; } }
@@ -836,10 +886,12 @@
                 currentCostPerKmValue = calculateCostPerKmValue(currentGasCost, totalOtherExpenses, kmDriven);
                 const periodAverage = currentPeriodRaceCount > 0 ? currentPeriodEarnings / currentPeriodRaceCount : 0;
 
+                // Atualiza os novos displays na seção de Ganhos
                 periodEarningsDisplaySpan.textContent = formatCurrency(currentPeriodEarnings);
                 periodRaceCountDisplaySpan.textContent = currentPeriodRaceCount;
                 periodAverageDisplaySpan.textContent = formatCurrency(periodAverage);
 
+                // Atualiza o resumo do ciclo (sem alterações aqui)
                 profitSpan.textContent = formatCurrency(profit);
                 lucroDiv.classList.toggle('positivo', profit >= 0);
                 lucroDiv.classList.toggle('negativo', profit < 0);
@@ -1003,6 +1055,7 @@
              function updateSimulatorState() { const costData = getCostPerKmForSimulation(); simulateCostBtn.disabled = (costData === null); if(costData === null) { simulationResultP.innerHTML = ''; } }
              function simulateCost() { const costData = getCostPerKmForSimulation(); if (costData === null) { simulationResultP.innerHTML = `Custo/KM indisponível.<br><span class="source-info">Finalize um ciclo com KM inicial/final.</span>`; simulationResultP.style.color = 'var(--warning-color)'; return; } const kmText = simulationKmInput.value; const km = parseFloat(kmText.replace(',', '.')); if (isNaN(km) || km <= 0) { simulationResultP.textContent = "Insira uma distância válida em KM."; simulationResultP.style.color = 'var(--danger-color)'; return; } const simulatedCost = km * costData.value; let sourceInfo = ''; if(costData.source === 'last_completed') { sourceInfo = `(Base: Último ciclo completo - ${costData.date})`; } else if (costData.source === 'current_cycle') { sourceInfo = `(Base: Ciclo atual - Custo/KM pode mudar)`; } simulationResultP.innerHTML = `Custo para ${formatNumber(km, 1)} KM: ${formatCurrency(simulatedCost)}<br><span class="source-info">${sourceInfo}</span>`; simulationResultP.style.color = 'var(--primary-color)'; }
 
+            // Event Listeners (sem alterações)
             addTotalEarningBtn.addEventListener('click', addOrUpdateTotalEarning);
             earningTotalInput.addEventListener('input', () => { addTotalEarningBtn.disabled = !(currentGasCost > 0) || earningTotalInput.value.trim() === ''; });
             earningTotalInput.addEventListener('keypress', (e) => { if (e.key === 'Enter' && !addTotalEarningBtn.disabled) { e.preventDefault(); addOrUpdateTotalEarning(); }});
@@ -1029,16 +1082,18 @@
             simulateCostBtn.addEventListener('click', simulateCost);
             simulationKmInput.addEventListener('keypress', (e) => { if (e.key === 'Enter' && !simulateCostBtn.disabled) { e.preventDefault(); simulateCost(); }});
 
+            // Inicialização (sem alterações)
             console.log("Inicializando App Ubeleza Calculadora v4.20.5...");
             initializeProfitChart();
             initializeArchivedStatsChart();
             updateEarningsTable();
             loadArchivedList();
-            updateSummaryAndCounts();
+            updateSummaryAndCounts(); // Esta função agora atualiza os novos elementos de ganhos
             updateArchivedStatsChart();
             toggleCycleContent(isCycleContentVisible, false);
             console.log("App inicializado.");
 
+            // Tooltips (sem alterações)
             document.querySelectorAll('[title]').forEach(el => {
                 if (!el.hasAttribute('data-tooltip') && el.id !== 'add-total-earning-btn') {
                      el.setAttribute('data-tooltip', el.getAttribute('title'));
