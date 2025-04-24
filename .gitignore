@@ -1,0 +1,26 @@
+# Arquivo de variáveis de ambiente (NÃO ENVIAR!)
+backend/.env
+
+# Pasta do Ambiente Virtual Python (NÃO ENVIAR!)
+backend/venv/
+
+# Pastas de Cache Python (Opcional, mas recomendado)
+backend/__pycache__/
+backend/*/__pycache__/
+backend/migrations/__pycache__/
+backend/migrations/versions/__pycache__/
+
+# Arquivos compilados Python (Opcional)
+backend/*.pyc
+backend/*/*.pyc
+
+# Arquivos de banco de dados SQLite (se usou para teste)
+backend/*.db
+backend/*.db-journal
+
+# Arquivos específicos do VSCode (Opcional)
+.vscode/
+
+# Arquivos do sistema operacional (Opcional)
+.DS_Store
+Thumbs.db

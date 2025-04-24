@@ -1,0 +1,2031 @@
+Okay, excelente plano! Refatorar seu aplicativo para usar um backend Python/Flask com PostgreSQL é um ótimo próximo passo para torná-lo mais robusto, escalável e acessível de qualquer lugar.
+
+Vou dividir isso em arquivos separados para organização, como você faria no VS Code.
+
+**Estrutura de Arquivos Sugerida:**
+
+```
+/ubeleza-calculadora/
+|-- /backend/
+|   |-- app.py             # Arquivo principal do Flask
+|   |-- models.py          # Definições do banco de dados (SQLAlchemy)
+|   |-- config.py          # Configurações do Flask (inclui DB URI)
+|   |-- requirements.txt   # Dependências Python
+|   |-- .env               # Variáveis de ambiente (NÃO versionar no Git!)
+|   |-- migrations/        # Pasta gerada pelo Flask-Migrate
+|
+|-- /frontend/
+|   |-- Uber_contas.html   # Seu arquivo HTML com JS modificado
+|
+|-- README.md              # Instruções de setup (essencial!)
+```
+
+Vamos criar o conteúdo de cada arquivo.
+
+---------------------------------------------------------------------------------------------------------------------------
+
+**Arquivo 1: `backend/config.py`**
+
+```python
+import os
+from dotenv import load_dotenv
+
+# Carrega variáveis do arquivo .env para o ambiente
+load_dotenv()
+
+class Config:
+    """Configurações base do Flask."""
+    SECRET_KEY = os.environ.get('SECRET_KEY') or 'uma-chave-secreta-muito-dificil-de-adivinhar' # Mude isso em produção!
+
+    # Configuração do SQLAlchemy
+    # Usa a variável DATABASE_URL do .env ou um SQLite padrão para desenvolvimento fácil
+    SQLALCHEMY_DATABASE_URI = os.environ.get('DATABASE_URL') or \
+        'sqlite:///' + os.path.join(os.path.abspath(os.path.dirname(__file__)), 'app.db')
+    SQLALCHEMY_TRACK_MODIFICATIONS = False # Desativa warnings desnecessários
+
+    # Configuração CORS (opcional, mas útil para desenvolvimento)
+    # Permite que o frontend (ex: localhost:xxxx) acesse a API (localhost:5000)
+    CORS_HEADERS = 'Content-Type'
+
+```
+
+---------------------------------------------------------------------------------------------------------------------------
+
+**Arquivo 2: `backend/.env`** (Crie este arquivo manualmente)
+
+```dotenv
+# Use a URL de conexão correta para o seu PostgreSQL
+# Formato: postgresql://usuario:senha@host:porta/nome_banco
+# Exemplo Local:
+DATABASE_URL=postgresql://user_ubeleza:password_ubeleza@localhost:5432/db_ubeleza
+
+# Gere uma chave secreta forte para produção (ex: usando secrets.token_hex(16) no Python)
+SECRET_KEY=sua_chave_secreta_aqui
+```
+
+**Importante:** Substitua os valores de `DATABASE_URL` e `SECRET_KEY` pelos seus. **NUNCA** coloque senhas ou chaves reais em código versionado (adicione `.env` ao seu `.gitignore`).
+
+---------------------------------------------------------------------------------------------------------------------------
+
+**Arquivo 3: `backend/models.py`**
+
+```python
+from flask_sqlalchemy import SQLAlchemy
+from sqlalchemy.dialects.postgresql import JSONB # Usar JSONB para PostgreSQL
+from datetime import datetime
+
+db = SQLAlchemy() # Instância do SQLAlchemy, será inicializada no app.py
+
+# Mantemos um modelo para o ciclo ATUAL, assumindo apenas um ciclo ativo por vez.
+# Se precisar de múltiplos usuários, adicionaria um user_id aqui.
+class CurrentCycle(db.Model):
+    __tablename__ = 'current_cycle'
+    id = db.Column(db.Integer, primary_key=True)
+    gas_cost = db.Column(db.Numeric(10, 2), nullable=False, default=0.0)
+    start_km = db.Column(db.Integer, nullable=True)
+    end_km = db.Column(db.Integer, nullable=True)
+    fuel_price_per_liter = db.Column(db.Numeric(10, 2), nullable=True)
+    is_active = db.Column(db.Boolean, default=False, nullable=False)
+    start_time = db.Column(db.DateTime(timezone=True), default=datetime.utcnow)
+
+    # Dados acumulados DENTRO do ciclo
+    cumulative_earnings = db.Column(db.Numeric(10, 2), nullable=False, default=0.0)
+    cumulative_race_count = db.Column(db.Integer, nullable=False, default=0)
+
+    # Dados do PERÍODO atual (que são resetados ao arquivar período)
+    current_period_earnings = db.Column(db.Numeric(10, 2), nullable=False, default=0.0)
+    current_period_race_count = db.Column(db.Integer, nullable=False, default=0)
+
+    # Relacionamentos (o ciclo "tem" várias corridas e despesas)
+    # cascade="all, delete-orphan": se o ciclo for deletado, deleta corridas/despesas associadas
+    # lazy='dynamic': permite fazer queries adicionais nos relacionamentos (ex: cycle.earnings.count())
+    earnings = db.relationship('Earning', backref='cycle', lazy='dynamic', cascade="all, delete-orphan")
+    expenses = db.relationship('Expense', backref='cycle', lazy='dynamic', cascade="all, delete-orphan")
+
+    def to_dict(self):
+        """Converte o objeto Ciclo para um dicionário."""
+        return {
+            'id': self.id,
+            'gas_cost': float(self.gas_cost) if self.gas_cost is not None else 0.0,
+            'start_km': self.start_km,
+            'end_km': self.end_km,
+            'fuel_price_per_liter': float(self.fuel_price_per_liter) if self.fuel_price_per_liter is not None else None,
+            'is_active': self.is_active,
+            'start_time': self.start_time.isoformat() if self.start_time else None,
+            'cumulative_earnings': float(self.cumulative_earnings) if self.cumulative_earnings is not None else 0.0,
+            'cumulative_race_count': self.cumulative_race_count or 0,
+            'current_period_earnings': float(self.current_period_earnings) if self.current_period_earnings is not None else 0.0,
+            'current_period_race_count': self.current_period_race_count or 0,
+        }
+
+
+class Earning(db.Model):
+    __tablename__ = 'earnings'
+    id = db.Column(db.Integer, primary_key=True)
+    cycle_id = db.Column(db.Integer, db.ForeignKey('current_cycle.id'), nullable=False)
+    timestamp = db.Column(db.DateTime(timezone=True), default=datetime.utcnow, nullable=False)
+    amount = db.Column(db.Numeric(10, 2), nullable=False)
+
+    def to_dict(self):
+        """Converte o objeto Earning para um dicionário."""
+        return {
+            'id': self.id,
+            'cycle_id': self.cycle_id,
+            'timestamp': self.timestamp.isoformat(),
+            'amount': float(self.amount)
+        }
+
+
+class Expense(db.Model):
+    __tablename__ = 'expenses'
+    id = db.Column(db.Integer, primary_key=True)
+    cycle_id = db.Column(db.Integer, db.ForeignKey('current_cycle.id'), nullable=False)
+    timestamp = db.Column(db.DateTime(timezone=True), default=datetime.utcnow, nullable=False)
+    category = db.Column(db.String(100), nullable=False)
+    amount = db.Column(db.Numeric(10, 2), nullable=False)
+
+    def to_dict(self):
+        """Converte o objeto Expense para um dicionário."""
+        return {
+            'id': self.id,
+            'cycle_id': self.cycle_id,
+            'timestamp': self.timestamp.isoformat(),
+            'category': self.category,
+            'amount': float(self.amount)
+        }
+
+
+class Archive(db.Model):
+    __tablename__ = 'archives'
+    id = db.Column(db.Integer, primary_key=True)
+    # Usamos JSONB para armazenar a estrutura complexa e flexível do arquivo
+    archive_data = db.Column(JSONB, nullable=False)
+    # Mantemos a data de arquivamento separada para facilitar ordenação/consulta
+    archive_date = db.Column(db.DateTime(timezone=True), default=datetime.utcnow, nullable=False)
+
+    def to_dict(self):
+        """Converte o objeto Archive para um dicionário."""
+        # Acessamos o campo JSONB diretamente
+        data = self.archive_data
+        # Adicionamos o ID do banco e a data formatada se não estiverem no JSON
+        data['db_id'] = self.id
+        data['archiveDate'] = self.archive_date.isoformat() # Garante consistência
+        return data
+```
+
+---------------------------------------------------------------------------------------------------------------------------
+
+**Arquivo 4: `backend/app.py`**
+
+```python
+import os
+from flask import Flask, request, jsonify
+from flask_sqlalchemy import SQLAlchemy
+from flask_migrate import Migrate
+from flask_cors import CORS # Importar CORS
+from decimal import Decimal, InvalidOperation # Para lidar com números decimais
+from datetime import datetime
+import json # Para lidar com o arquivamento
+
+# Importar configurações e modelos
+from config import Config
+from models import db, CurrentCycle, Earning, Expense, Archive # Importa db daqui
+
+# Inicialização do App Flask
+app = Flask(__name__)
+app.config.from_object(Config)
+
+# Inicialização das extensões
+db.init_app(app)
+migrate = Migrate(app, db)
+CORS(app) # Habilita CORS para todas as rotas (ajuste se precisar de mais controle)
+
+# --- Funções Auxiliares ---
+def get_active_cycle():
+    """Busca o ciclo ativo no banco de dados."""
+    return CurrentCycle.query.filter_by(is_active=True).first()
+
+def get_or_create_active_cycle():
+    """Busca o ciclo ativo ou cria um novo se nenhum existir (mas não o ativa)."""
+    cycle = get_active_cycle()
+    if not cycle:
+        # Cria um ciclo inicial inativo se o banco estiver vazio
+        cycle = CurrentCycle(is_active=False)
+        db.session.add(cycle)
+        db.session.commit() # Salva para obter um ID
+        # Recarrega para garantir que temos o objeto com ID
+        cycle = CurrentCycle.query.get(cycle.id)
+    return cycle
+
+def calculate_and_update_cycle_totals(cycle):
+    """Recalcula e atualiza totais do ciclo baseado nas corridas."""
+    if not cycle:
+        return
+
+    total_earnings = db.session.query(db.func.sum(Earning.amount)).filter(Earning.cycle_id == cycle.id).scalar() or Decimal('0.0')
+    total_races = cycle.earnings.count() # Usa o relacionamento lazy='dynamic'
+
+    cycle.cumulative_earnings = total_earnings
+    cycle.cumulative_race_count = total_races
+    # Atualiza também os totais do período atual (assumindo que são os mesmos do ciclo neste modelo)
+    cycle.current_period_earnings = total_earnings
+    cycle.current_period_race_count = total_races
+    db.session.commit()
+
+# --- Rotas da API ---
+
+@app.route('/api/state', methods=['GET'])
+def get_app_state():
+    """Retorna o estado atual completo do aplicativo."""
+    cycle = get_or_create_active_cycle() # Garante que sempre temos um ciclo (mesmo inativo)
+    earnings_list = [e.to_dict() for e in cycle.earnings.order_by(Earning.timestamp.asc()).all()] if cycle else []
+    expenses_list = [e.to_dict() for e in cycle.expenses.order_by(Expense.timestamp.asc()).all()] if cycle else []
+    archives_list = [a.to_dict() for a in Archive.query.order_by(Archive.archive_date.desc()).all()]
+
+    return jsonify({
+        'currentCycle': cycle.to_dict() if cycle else None,
+        'earningsList': earnings_list,
+        'expenseList': expenses_list,
+        'archives': archives_list
+    })
+
+@app.route('/api/cycles/start', methods=['POST'])
+def start_cycle():
+    """Inicia um novo ciclo."""
+    data = request.get_json()
+    if not data:
+        return jsonify({"error": "Payload inválido"}), 400
+
+    gas_cost_str = data.get('gas_cost')
+    start_km_str = data.get('start_km')
+    fuel_price_str = data.get('fuel_price')
+
+    try:
+        gas_cost = Decimal(gas_cost_str) if gas_cost_str is not None else Decimal('0.0')
+        if gas_cost <= 0:
+             return jsonify({"error": "Custo da gasolina deve ser positivo"}), 400
+    except (InvalidOperation, TypeError):
+        return jsonify({"error": "Valor inválido para custo da gasolina"}), 400
+
+    start_km = int(start_km_str) if start_km_str else None
+    fuel_price = Decimal(fuel_price_str) if fuel_price_str else None
+
+    # Desativa qualquer ciclo antigo que possa estar ativo (segurança)
+    existing_active = get_active_cycle()
+    if existing_active:
+        existing_active.is_active = False
+        db.session.add(existing_active)
+
+    # Cria o novo ciclo
+    new_cycle = CurrentCycle(
+        gas_cost=gas_cost,
+        start_km=start_km,
+        fuel_price_per_liter=fuel_price,
+        is_active=True,
+        start_time=datetime.utcnow(),
+        cumulative_earnings=Decimal('0.0'),
+        cumulative_race_count=0,
+        current_period_earnings=Decimal('0.0'),
+        current_period_race_count=0
+    )
+    db.session.add(new_cycle)
+    db.session.commit()
+
+    return jsonify(new_cycle.to_dict()), 201 # 201 Created
+
+@app.route('/api/cycles/finalize', methods=['POST'])
+def finalize_cycle():
+    """Finaliza o ciclo atual, arquivando-o."""
+    cycle = get_active_cycle()
+    if not cycle or not cycle.is_active:
+        return jsonify({"error": "Nenhum ciclo ativo para finalizar"}), 400
+
+    data = request.get_json() or {}
+    end_km_str = data.get('end_km')
+    note = data.get('note', '')
+
+    try:
+        end_km = int(end_km_str) if end_km_str is not None else cycle.start_km # Default to start_km if invalid/missing
+        if cycle.start_km is not None and end_km < cycle.start_km:
+             return jsonify({"error": f"KM Final ({end_km}) não pode ser menor que Inicial ({cycle.start_km})"}), 400
+        cycle.end_km = end_km
+    except (ValueError, TypeError):
+         return jsonify({"error": "Valor inválido para KM final"}), 400
+
+    # 1. Calcular dados finais para o arquivo
+    earnings_list = [e.to_dict() for e in cycle.earnings.order_by(Earning.timestamp.asc()).all()]
+    expenses_list = [e.to_dict() for e in cycle.expenses.order_by(Expense.timestamp.asc()).all()]
+    total_other_expenses = sum(Decimal(exp['amount']) for exp in expenses_list)
+    profit = cycle.cumulative_earnings - cycle.gas_cost - total_other_expenses
+    km_driven = (cycle.end_km - cycle.start_km) if cycle.start_km is not None and cycle.end_km is not None and cycle.end_km >= cycle.start_km else 0
+    km_per_liter = None
+    cost_per_km = None
+    if km_driven > 0 and cycle.gas_cost > 0 and cycle.fuel_price_per_liter is not None and cycle.fuel_price_per_liter > 0:
+        liters_used = cycle.gas_cost / cycle.fuel_price_per_liter
+        if liters_used > 0:
+            km_per_liter = km_driven / float(liters_used) # float for potential division result
+    if km_driven > 0:
+         cost_per_km = (cycle.gas_cost + total_other_expenses) / Decimal(km_driven)
+
+
+    # 2. Criar o objeto de arquivamento (usando a estrutura esperada pelo frontend)
+    archive_payload = {
+        "archiveDate": datetime.utcnow().isoformat(), # Armazenado no JSON e no campo DB
+        "archiveType": "Ciclo Completo",
+        "cycleEarnings": float(cycle.cumulative_earnings),
+        "gasCost": float(cycle.gas_cost),
+        "expensesList": expenses_list, # Lista de dicts
+        "cycleRaceCount": cycle.cumulative_race_count,
+        "startKM": cycle.start_km,
+        "endKM": cycle.end_km,
+        "fuelPricePerLiter": float(cycle.fuel_price_per_liter) if cycle.fuel_price_per_liter else None,
+        "note": note,
+        "summary_totalOtherExpenses": float(total_other_expenses),
+        "summary_profit": float(profit),
+        "summary_kmDriven": km_driven,
+        "summary_kmPerLiter": f"{km_per_liter:.2f}" if km_per_liter is not None else "N/A",
+        "summary_costPerKm": f"{cost_per_km:.2f}" if cost_per_km is not None else "N/A", # Formatando como string no JSON
+        "periodEndDate": datetime.utcnow().isoformat(), # Data de finalização do ciclo
+        "earningsDetails": earnings_list, # Lista de dicts
+    }
+
+    # 3. Salvar o Arquivo
+    new_archive = Archive(archive_data=archive_payload, archive_date=datetime.utcnow())
+    db.session.add(new_archive)
+
+    # 4. Desativar e Resetar o ciclo atual (ou deletar e criar um novo inativo)
+    # Optamos por desativar e limpar para manter o ID, mas deletar tb funciona
+    cycle.is_active = False
+    # Poderia resetar os campos aqui, mas ao buscar/criar um novo ciclo inativo resolve
+    # Ex: cycle.gas_cost = 0 ... etc
+    db.session.add(cycle)
+
+    # Deletar corridas e despesas associadas (alternativa à cascade no modelo)
+    # Earning.query.filter_by(cycle_id=cycle.id).delete()
+    # Expense.query.filter_by(cycle_id=cycle.id).delete()
+
+    db.session.commit()
+
+    # Retorna o novo estado (sem ciclo ativo e listas vazias)
+    new_state = get_app_state().get_json() # Chama a rota para obter o estado atualizado
+    return jsonify(new_state)
+
+
+# --- Rotas para Corridas (Earnings) ---
+
+@app.route('/api/earnings', methods=['POST'])
+def add_earning():
+    """Adiciona uma nova corrida/ganho ao período/ciclo atual."""
+    cycle = get_active_cycle()
+    if not cycle or not cycle.is_active:
+        return jsonify({"error": "Nenhum ciclo ativo para adicionar ganhos"}), 400
+
+    data = request.get_json()
+    if not data or 'amount' not in data or 'new_period_total' not in data:
+        return jsonify({"error": "Payload inválido. 'amount' e 'new_period_total' são obrigatórios"}), 400
+
+    try:
+        # 'amount' aqui é a DIFERENÇA calculada pelo frontend
+        amount = Decimal(data['amount'])
+        new_period_total = Decimal(data['new_period_total'])
+        timestamp_str = data.get('timestamp', datetime.utcnow().isoformat()) # Frontend pode mandar o timestamp exato
+        timestamp = datetime.fromisoformat(timestamp_str)
+
+        if amount < 0: # Correção de total (sem adicionar corrida)
+             pass # Não cria Earning, apenas atualiza totais abaixo
+        else:
+            new_earning = Earning(
+                cycle_id=cycle.id,
+                amount=amount,
+                timestamp=timestamp
+            )
+            db.session.add(new_earning)
+
+        # Atualiza os totais do ciclo/período
+        cycle.current_period_earnings = new_period_total
+        cycle.cumulative_earnings += amount # Adiciona a diferença ao acumulado do ciclo
+        # Incrementa contagem apenas se for um ganho positivo (nova corrida)
+        if amount > 0:
+            cycle.current_period_race_count += 1
+            cycle.cumulative_race_count += 1
+
+        db.session.add(cycle)
+        db.session.commit()
+
+        # Retorna o estado atualizado
+        updated_state = get_app_state().get_json()
+        return jsonify(updated_state)
+
+    except (InvalidOperation, TypeError, ValueError) as e:
+        db.session.rollback()
+        return jsonify({"error": f"Dados inválidos: {e}"}), 400
+
+
+@app.route('/api/earnings/<int:earning_id>', methods=['PUT'])
+def edit_earning(earning_id):
+    """Edita o valor de uma corrida existente."""
+    cycle = get_active_cycle()
+    if not cycle or not cycle.is_active:
+        return jsonify({"error": "Ciclo inativo"}), 400
+
+    earning = Earning.query.filter_by(id=earning_id, cycle_id=cycle.id).first()
+    if not earning:
+        return jsonify({"error": "Corrida não encontrada neste ciclo"}), 404
+
+    data = request.get_json()
+    if not data or 'amount' not in data:
+        return jsonify({"error": "Payload inválido. 'amount' é obrigatório"}), 400
+
+    try:
+        new_amount = Decimal(data['amount'])
+        if new_amount < 0:
+            return jsonify({"error": "Valor da corrida não pode ser negativo"}), 400
+
+        old_amount = earning.amount
+        difference = new_amount - old_amount
+
+        earning.amount = new_amount
+        db.session.add(earning)
+
+        # Reajusta totais do ciclo/período
+        cycle.cumulative_earnings += difference
+        cycle.current_period_earnings += difference # Assume que período reflete ciclo
+        db.session.add(cycle)
+
+        db.session.commit()
+
+        updated_state = get_app_state().get_json()
+        return jsonify(updated_state)
+
+    except (InvalidOperation, TypeError):
+        db.session.rollback()
+        return jsonify({"error": "Valor inválido para amount"}), 400
+
+@app.route('/api/earnings/<int:earning_id>', methods=['DELETE'])
+def delete_earning(earning_id):
+    """Exclui uma corrida."""
+    cycle = get_active_cycle()
+    if not cycle or not cycle.is_active:
+        return jsonify({"error": "Ciclo inativo"}), 400
+
+    earning = Earning.query.filter_by(id=earning_id, cycle_id=cycle.id).first()
+    if not earning:
+        return jsonify({"error": "Corrida não encontrada neste ciclo"}), 404
+
+    amount_deleted = earning.amount
+    db.session.delete(earning)
+
+    # Reajusta totais do ciclo/período
+    cycle.cumulative_earnings -= amount_deleted
+    cycle.current_period_earnings -= amount_deleted
+    cycle.cumulative_race_count -= 1
+    cycle.current_period_race_count -= 1
+    # Garante que não fiquem negativos
+    cycle.cumulative_earnings = max(Decimal('0.0'), cycle.cumulative_earnings)
+    cycle.current_period_earnings = max(Decimal('0.0'), cycle.current_period_earnings)
+    cycle.cumulative_race_count = max(0, cycle.cumulative_race_count)
+    cycle.current_period_race_count = max(0, cycle.current_period_race_count)
+
+    db.session.add(cycle)
+    db.session.commit()
+
+    updated_state = get_app_state().get_json()
+    return jsonify(updated_state)
+
+
+# --- Rotas para Despesas (Expenses) ---
+
+@app.route('/api/expenses', methods=['POST'])
+def add_expense():
+    """Adiciona uma nova despesa ao ciclo atual."""
+    cycle = get_active_cycle()
+    if not cycle or not cycle.is_active:
+        return jsonify({"error": "Nenhum ciclo ativo para adicionar despesas"}), 400
+
+    data = request.get_json()
+    if not data or 'category' not in data or 'amount' not in data:
+        return jsonify({"error": "Payload inválido. 'category' e 'amount' são obrigatórios"}), 400
+
+    try:
+        amount = Decimal(data['amount'])
+        if amount <= 0:
+            return jsonify({"error": "Valor da despesa deve ser positivo"}), 400
+
+        timestamp_str = data.get('timestamp', datetime.utcnow().isoformat())
+        timestamp = datetime.fromisoformat(timestamp_str)
+        category = data['category']
+
+        new_expense = Expense(
+            cycle_id=cycle.id,
+            category=category,
+            amount=amount,
+            timestamp=timestamp
+        )
+        db.session.add(new_expense)
+        db.session.commit()
+
+        # Não precisa recalcular totais do ciclo aqui, apenas retornar estado
+        updated_state = get_app_state().get_json()
+        return jsonify(updated_state), 201
+
+    except (InvalidOperation, TypeError, ValueError) as e:
+        db.session.rollback()
+        return jsonify({"error": f"Dados inválidos: {e}"}), 400
+
+
+@app.route('/api/expenses/<int:expense_id>', methods=['DELETE'])
+def delete_expense(expense_id):
+    """Exclui uma despesa."""
+    cycle = get_active_cycle()
+    if not cycle or not cycle.is_active:
+         # Permitir deletar mesmo se ciclo inativo? Talvez não.
+        return jsonify({"error": "Ciclo inativo"}), 400
+
+    expense = Expense.query.filter_by(id=expense_id, cycle_id=cycle.id).first()
+    if not expense:
+        return jsonify({"error": "Despesa não encontrada neste ciclo"}), 404
+
+    db.session.delete(expense)
+    db.session.commit()
+
+    updated_state = get_app_state().get_json()
+    return jsonify(updated_state)
+
+
+# --- Rotas para Arquivos ---
+
+@app.route('/api/archives', methods=['GET'])
+def get_archives():
+    """Lista todos os arquivos."""
+    archives_list = [a.to_dict() for a in Archive.query.order_by(Archive.archive_date.desc()).all()]
+    return jsonify(archives_list)
+
+@app.route('/api/archives/period', methods=['POST'])
+def archive_period():
+    """Arquiva apenas o período atual (ganhos/corridas), resetando-os no ciclo."""
+    cycle = get_active_cycle()
+    if not cycle or not cycle.is_active:
+        return jsonify({"error": "Nenhum ciclo ativo para arquivar período"}), 400
+
+    if cycle.current_period_earnings <= 0 and cycle.current_period_race_count <= 0:
+         return jsonify({"error": "Sem dados no período atual para arquivar"}), 400
+
+    data = request.get_json() or {}
+    note = data.get('note', '')
+
+    # 1. Coleta dados do período atual do ciclo
+    # Precisamos buscar as corridas *deste período* (neste modelo, são todas do ciclo)
+    earnings_details_list = [e.to_dict() for e in cycle.earnings.order_by(Earning.timestamp.asc()).all()]
+    period_end_date = datetime.utcnow() # Ou a data da última corrida? Usamos now.
+
+    # 2. Calcula o lucro snapshot (considerando despesas TOTAIS do ciclo até agora)
+    expenses_list = [e.to_dict() for e in cycle.expenses.order_by(Expense.timestamp.asc()).all()]
+    total_other_expenses = sum(Decimal(exp['amount']) for exp in expenses_list)
+    profit_snapshot = cycle.cumulative_earnings - cycle.gas_cost - total_other_expenses
+
+    # 3. Cria payload do arquivo parcial
+    archive_payload = {
+        "archiveDate": period_end_date.isoformat(),
+        "archiveType": "Período Parcial",
+        "periodEarnings": float(cycle.current_period_earnings),
+        "periodRaceCount": cycle.current_period_race_count,
+        "periodEndDate": period_end_date.isoformat(),
+        "earningsDetails": earnings_details_list, # Corridas até o momento
+        "note": note,
+        "gasCostSnapshot": float(cycle.gas_cost), # Gasolina do ciclo atual
+        "cycleProfitSnapshot": float(profit_snapshot) # Lucro do ciclo até agora
+    }
+
+    # 4. Salva o Arquivo
+    new_archive = Archive(archive_data=archive_payload, archive_date=period_end_date)
+    db.session.add(new_archive)
+
+    # 5. Reseta os dados do PERÍODO no ciclo atual
+    cycle.current_period_earnings = Decimal('0.0')
+    cycle.current_period_race_count = 0
+    # IMPORTANTÍSSIMO: Deletar as corridas associadas a este período que foi arquivado.
+    # No nosso modelo atual, período = ciclo, então deletamos TODAS as corridas do ciclo.
+    cycle.earnings.delete() # Deleta todas as Earning associadas a este cycle_id
+
+    # Atualiza também os acumulados do ciclo, já que as corridas foram removidas
+    cycle.cumulative_earnings = Decimal('0.0')
+    cycle.cumulative_race_count = 0
+
+    db.session.add(cycle)
+    db.session.commit()
+
+    updated_state = get_app_state().get_json()
+    return jsonify(updated_state)
+
+
+@app.route('/api/archives/<int:archive_id>', methods=['DELETE'])
+def delete_archive(archive_id):
+    """Exclui um arquivo."""
+    archive = Archive.query.get(archive_id)
+    if not archive:
+        return jsonify({"error": "Arquivo não encontrado"}), 404
+
+    # Lógica extra se for "Período Parcial" e um ciclo estiver ativo
+    cycle = get_active_cycle()
+    archive_data = archive.archive_data # Pega o JSONB
+    subtracted = False
+
+    if cycle and cycle.is_active and archive_data.get("archiveType") == "Período Parcial":
+        # Descontar valores do ciclo atual? É complexo e pode levar a inconsistências.
+        # Por simplicidade, vamos apenas deletar o arquivo sem reajustar o ciclo ativo.
+        # O usuário foi avisado no frontend.
+        # Se precisar implementar:
+        # earnings_to_add_back = Decimal(archive_data.get('periodEarnings', 0))
+        # races_to_add_back = int(archive_data.get('periodRaceCount', 0))
+        # cycle.cumulative_earnings += earnings_to_add_back # Ou current_period?
+        # cycle.cumulative_race_count += races_to_add_back
+        # db.session.add(cycle)
+        # subtracted = True
+        pass # Mantendo simples por enquanto
+
+    db.session.delete(archive)
+    db.session.commit()
+
+    response_data = {"message": "Arquivo excluído."}
+    # if subtracted:
+    #     response_data["details"] = "Valores do período parcial NÃO foram reajustados no ciclo atual."
+
+    # Retorna a lista atualizada de arquivos
+    archives_list = [a.to_dict() for a in Archive.query.order_by(Archive.archive_date.desc()).all()]
+    response_data["archives"] = archives_list
+    return jsonify(response_data)
+
+
+# --- Rotas para Edição Direta de Campos do Ciclo ---
+# (Alternativa a ter rotas separadas para cada campo)
+
+@app.route('/api/cycles/current', methods=['PUT'])
+def update_cycle_fields():
+    """Atualiza campos específicos do ciclo ativo."""
+    cycle = get_active_cycle()
+    if not cycle or not cycle.is_active:
+        return jsonify({"error": "Nenhum ciclo ativo para atualizar"}), 400
+
+    data = request.get_json()
+    if not data:
+        return jsonify({"error": "Payload inválido"}), 400
+
+    updated = False
+    try:
+        if 'gas_cost' in data:
+            cycle.gas_cost = Decimal(data['gas_cost'])
+            updated = True
+        if 'fuel_price' in data:
+            cycle.fuel_price_per_liter = Decimal(data['fuel_price']) if data['fuel_price'] is not None else None
+            updated = True
+        if 'start_km' in data:
+            new_start_km = int(data['start_km']) if data['start_km'] is not None else None
+            if cycle.end_km is not None and new_start_km is not None and new_start_km > cycle.end_km:
+                 return jsonify({"error": f"KM inicial ({new_start_km}) não pode ser maior que KM final ({cycle.end_km})"}), 400
+            cycle.start_km = new_start_km
+            updated = True
+        if 'end_km' in data:
+            new_end_km = int(data['end_km']) if data['end_km'] is not None else None
+            if cycle.start_km is not None and new_end_km is not None and new_end_km < cycle.start_km:
+                 return jsonify({"error": f"KM final ({new_end_km}) não pode ser menor que KM inicial ({cycle.start_km})"}), 400
+            cycle.end_km = new_end_km
+            updated = True
+
+        if updated:
+            db.session.add(cycle)
+            db.session.commit()
+            updated_state = get_app_state().get_json()
+            return jsonify(updated_state)
+        else:
+            return jsonify({"message": "Nenhum campo válido para atualizar foi fornecido"}), 400
+
+    except (InvalidOperation, TypeError, ValueError) as e:
+        db.session.rollback()
+        return jsonify({"error": f"Dados inválidos: {e}"}), 400
+
+
+# --- Rota de Reset (Opcional e Perigosa) ---
+@app.route('/api/reset', methods=['POST'])
+def reset_database():
+    """Apaga TODOS os dados do banco. Use com EXTREMO cuidado."""
+    # Adicionar alguma forma de confirmação extra ou autenticação aqui seria vital
+    try:
+        # Ordem importa por causa das Foreign Keys
+        Earning.query.delete()
+        Expense.query.delete()
+        Archive.query.delete()
+        CurrentCycle.query.delete()
+        db.session.commit()
+        # Cria um ciclo inicial inativo novamente
+        get_or_create_active_cycle()
+        return jsonify({"message": "Banco de dados resetado com sucesso."})
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"error": f"Erro ao resetar o banco: {e}"}), 500
+
+
+if __name__ == '__main__':
+    app.run(debug=True) # debug=True é bom para desenvolvimento, desative em produção
+```
+
+---------------------------------------------------------------------------------------------------------------------------
+
+**Arquivo 5: `backend/requirements.txt`**
+
+```txt
+Flask
+Flask-SQLAlchemy
+Flask-Migrate
+psycopg2-binary # Driver PostgreSQL
+python-dotenv
+Flask-Cors
+```
+
+---------------------------------------------------------------------------------------------------------------------------
+
+**Arquivo 6: `frontend/Uber_contas.html` (Apenas a seção `<script>` modificada)**
+
+Substitua *toda* a tag `<script>` no seu arquivo HTML original por esta versão modificada. As principais mudanças são:
+
+*   Remoção das variáveis globais que agora vêm do backend (`currentGasCost`, `earningsList`, etc.). Elas serão gerenciadas dentro do `appState`.
+*   Adição de um objeto `appState` para guardar os dados recebidos da API.
+*   Adição da constante `API_BASE_URL`.
+*   Criação da função `fetchApi` para centralizar as chamadas de API.
+*   Modificação de todas as funções que usavam `localStorage` para usar `fetchApi`.
+*   Adição da função `loadInitialData` para carregar tudo no início.
+*   Ajustes nas funções para usar `appState` e passar IDs para o backend quando necessário.
+
+```html
+    <!-- ... (resto do HTML continua igual até a tag script) ... -->
+
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            // --- Elementos DOM (mantidos) ---
+            const earningTotalInput = document.getElementById('earning-total-input');
+            const addTotalEarningBtn = document.getElementById('add-total-earning-btn');
+            const periodEarningsDisplaySpan = document.getElementById('period-earnings-display');
+            const periodRaceCountDisplaySpan = document.getElementById('period-race-count-display');
+            const periodAverageDisplaySpan = document.getElementById('period-average-display');
+            const earningsTbody = document.getElementById('earnings-tbody');
+            const toggleHistoryBtn = document.getElementById('toggle-history-btn');
+            const archiveHistoryBtn = document.getElementById('archive-history-btn');
+            const earningsTable = document.getElementById('earnings-table');
+            const gasRequiredEarningMsg = document.getElementById('gas-required-earning');
+            const startNewCycleBtn = document.getElementById('start-new-cycle-btn');
+            const finalizeCycleBtn = document.getElementById('finalize-cycle-btn');
+            const currentGasCostSpan = document.getElementById('current-gas-cost');
+            const editCurrentGasBtn = document.getElementById('edit-current-gas-btn');
+            const expenseCategorySelect = document.getElementById('expense-category');
+            const expenseAmountInput = document.getElementById('expense-amount');
+            const addExpenseBtn = document.getElementById('add-expense-btn');
+            const expensesTable = document.getElementById('expenses-table');
+            const expensesTbody = document.getElementById('expenses-tbody');
+            const toggleExpenseHistoryBtn = document.getElementById('toggle-expense-history-btn');
+            const startKmInput = document.getElementById('cycle-start-km');
+            const endKmInput = document.getElementById('cycle-end-km');
+            const cycleOtherExpensesSpan = document.getElementById('cycle-other-expenses');
+            const profitSpan = document.getElementById('profit');
+            const lucroDiv = document.querySelector('.lucro');
+            const raceCountSpan = document.getElementById('race-count');
+            const cycleKmDrivenSpan = document.getElementById('cycle-km-driven');
+            const cycleFuelPriceSpan = document.getElementById('cycle-fuel-price');
+            const editFuelPriceBtn = document.getElementById('edit-fuel-price-btn');
+            const cycleKmPerLiterSpan = document.getElementById('cycle-km-per-liter');
+            const cycleCostPerKmSpan = document.getElementById('cycle-cost-per-km');
+            const profitChartCtx = document.getElementById('profitChart').getContext('2d');
+            const simulationKmInput = document.getElementById('simulation-km');
+            const simulateCostBtn = document.getElementById('simulate-cost-btn');
+            const simulationResultP = document.getElementById('simulation-result');
+            const archivedListDiv = document.getElementById('archived-list');
+            const noArchivesMessage = document.getElementById('no-archives-message');
+            const archivedChartCtx = document.getElementById('archivedStatsChart').getContext('2d');
+            const archivedChartContainer = document.getElementById('archived-chart-container');
+            const modal = document.getElementById('archive-details-modal');
+            const modalCloseBtn = document.getElementById('modal-close-btn');
+            const modalTitleSpan = document.getElementById('modal-title');
+            const modalSummaryDiv = document.getElementById('modal-summary');
+            const modalTbody = document.getElementById('modal-tbody');
+            const modalExpensesTbody = document.getElementById('modal-expenses-tbody');
+            const modalRunsTitle = document.getElementById('modal-runs-title');
+            const modalExpensesTitle = document.getElementById('modal-expenses-title');
+            const modalDetailsTableContainer = document.getElementById('modal-details-table-container');
+            const modalExpensesTableContainer = document.getElementById('modal-expenses-table-container');
+            const resetAppBtn = document.getElementById('reset-app-btn');
+            const editStartKmBtn = document.getElementById('edit-start-km-btn');
+            const editEndKmBtn = document.getElementById('edit-end-km-btn');
+            const toggleCycleContentBtn = document.getElementById('toggle-cycle-content-btn');
+            const cycleContentWrapper = document.getElementById('cycle-content-wrapper');
+
+            // --- Configurações e Estado ---
+            const API_BASE_URL = 'http://127.0.0.1:5000/api'; // URL do seu backend Flask
+            const storagePrefix = 'v4.20.5_ui_'; // Prefixo para estado da UI no localStorage
+
+            // Estado do aplicativo (será preenchido pela API)
+            let appState = {
+                currentCycle: null,
+                earningsList: [],
+                expenseList: [],
+                archives: []
+            };
+
+            // Estado da UI (mantido no localStorage)
+            let isHistoryVisible = localStorage.getItem(storagePrefix + 'isHistoryVisible') === 'true';
+            let isExpenseHistoryVisible = localStorage.getItem(storagePrefix + 'isExpenseHistoryVisible') === 'true';
+            let isCycleContentVisible = localStorage.getItem(storagePrefix + 'isCycleContentVisible') !== 'false';
+
+            // Variáveis auxiliares (mantidas)
+            let profitChartInstance = null;
+            let archivedStatsChartInstance = null;
+            let currentArchiveIndex = -1; // Para saber qual arquivo está no modal
+            let currentCostPerKmValue = null; // Recalculado no frontend
+
+            const MIN_INCREMENT = 5.00;
+            const MAX_INCREMENT = 60.00;
+            const NA_DISPLAY = "N/A";
+            const DARK_COLORS = { /* ... (cores mantidas) ... */
+                gas: 'rgba(255, 69, 58, 0.7)',
+                others: 'rgba(94, 92, 230, 0.7)',
+                profit: 'rgba(48, 209, 88, 0.7)',
+                insufficient: 'rgba(255, 159, 10, 0.7)',
+                noData: 'rgba(142, 142, 147, 0.7)',
+                border: '#1c1c1e'
+            };
+
+            // --- Funções de Formatação (mantidas) ---
+            function formatCurrency(value) { if (typeof value !== 'number' || isNaN(value)) return 'R$ 0,00'; return value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }); }
+            function formatNumber(value, decimals = 2) { if (typeof value !== 'number' || isNaN(value)) return 'N/A'; return value.toLocaleString('pt-BR', { minimumFractionDigits: decimals, maximumFractionDigits: decimals }); }
+            function formatDateTime(dateObjOrStr, includeTime = true) { try { const date = dateObjOrStr instanceof Date ? dateObjOrStr : new Date(dateObjOrStr); if (isNaN(date.getTime())) return dateObjOrStr; const day = String(date.getDate()).padStart(2, '0'); const month = String(date.getMonth() + 1).padStart(2, '0'); const year = String(date.getFullYear()).slice(-2); if (!includeTime) return `${day}/${month}/${year}`; const hours = String(date.getHours()).padStart(2, '0'); const minutes = String(date.getMinutes()).padStart(2, '0'); return `${day}/${month}/${year} ${hours}:${minutes}`; } catch (e) { console.error("Erro formatando data:", dateObjOrStr, e); return dateObjOrStr; } }
+            function parseArchivedValue(value) { return typeof value === 'number' && !isNaN(value) ? value : 0; } // Usado no modal/lista de arquivos
+            function parseCurrencyString(valueStr) { if (!valueStr || typeof valueStr !== 'string' || valueStr.toUpperCase() === NA_DISPLAY) { return null; } try { const cleanedStr = String(valueStr).replace(/R\$\s?/, '').replace(/\./g, '').replace(',', '.'); const value = parseFloat(cleanedStr); return isNaN(value) ? null : value; } catch (e) { console.error("Erro ao parsear string de moeda:", valueStr, e); return null; } } // Usado no simulador
+
+            // --- Funções de Cálculo (mantidas no frontend para UI) ---
+            function calculateKmDriven(start, end) { const startKm = parseInt(start, 10); const endKm = parseInt(end, 10); if (!isNaN(startKm) && !isNaN(endKm) && startKm >= 0 && endKm > 0 && endKm >= startKm) { return endKm - startKm; } return 0; }
+            function calculateKmPerLiter(kmDriven, gasCost, fuelPrice) { if (kmDriven > 0 && gasCost > 0 && fuelPrice > 0) { const litersUsed = gasCost / fuelPrice; if (litersUsed > 0) { return (kmDriven / litersUsed); } } return null; }
+            function calculateCostPerKmValue(gasCost, totalOtherExpenses, kmDriven) { if (kmDriven > 0) { const totalCost = gasCost + totalOtherExpenses; return totalCost / kmDriven; } return null; }
+            function getTotalOtherExpenses() { return appState.expenseList.reduce((sum, expense) => sum + expense.amount, 0); }
+
+            // --- Função Auxiliar para API ---
+            async function fetchApi(endpoint, method = 'GET', body = null) {
+                const url = `${API_BASE_URL}${endpoint}`;
+                const options = {
+                    method: method,
+                    headers: {}
+                };
+                if (body) {
+                    options.headers['Content-Type'] = 'application/json';
+                    options.body = JSON.stringify(body);
+                }
+
+                try {
+                    // console.log(`API Request: ${method} ${url}`, body ? body : ''); // Log para debug
+                    const response = await fetch(url, options);
+                    const responseData = await response.json(); // Tenta parsear JSON mesmo em erro
+                    // console.log(`API Response: ${response.status}`, responseData); // Log para debug
+
+                    if (!response.ok) {
+                        // Tenta exibir a mensagem de erro do backend, senão uma genérica
+                        const errorMessage = responseData?.error || `Erro ${response.status}: ${response.statusText}`;
+                        console.error("API Error:", errorMessage);
+                        alert(`Erro na comunicação com o servidor:\n${errorMessage}`);
+                        return null; // Indica falha
+                    }
+                    return responseData; // Retorna os dados em caso de sucesso
+                } catch (error) {
+                    console.error(`Falha na requisição para ${method} ${url}:`, error);
+                    alert("Erro de rede ou falha ao conectar com o servidor. Verifique o console para detalhes.");
+                    return null; // Indica falha grave
+                }
+            }
+
+            // --- Funções de Atualização da UI (Modificadas para usar appState) ---
+            function updateUIFromState() {
+                // Atualiza todas as partes da UI com base no appState atual
+                updateSummaryAndCounts();
+                updateEarningsTable();
+                updateExpenseTable();
+                loadArchivedList(); // Renderiza a lista de arquivos do appState
+                updateProfitChart();
+                updateArchivedStatsChart(); // Atualiza gráfico de arquivos
+                checkCycleStateAndToggleUI(); // Habilita/desabilita botões e inputs
+                updateSimulatorState(); // Habilita/desabilita simulador
+            }
+
+            function updateSummaryAndCounts() {
+                const cycle = appState.currentCycle;
+                const earningsList = appState.earningsList;
+                const expenseList = appState.expenseList;
+
+                const gasCost = cycle?.gas_cost || 0;
+                const cumulativeEarnings = cycle?.cumulative_earnings || 0;
+                const cumulativeRaces = cycle?.cumulative_race_count || 0;
+                const periodEarnings = cycle?.current_period_earnings || 0;
+                const periodRaces = cycle?.current_period_race_count || 0;
+                const startKM = cycle?.start_km || 0;
+                const endKM = cycle?.end_km || 0;
+                const fuelPrice = cycle?.fuel_price_per_liter || 0;
+
+                const totalOtherExpenses = getTotalOtherExpenses(); // Usa a função que soma appState.expenseList
+                const profit = cumulativeEarnings - gasCost - totalOtherExpenses;
+                const kmDriven = calculateKmDriven(startKM, endKM);
+                const kmPerLiterValue = calculateKmPerLiter(kmDriven, gasCost, fuelPrice);
+                currentCostPerKmValue = calculateCostPerKmValue(gasCost, totalOtherExpenses, kmDriven); // Atualiza variável global para simulador
+                const periodAverage = periodRaces > 0 ? periodEarnings / periodRaces : 0;
+
+                // Atualiza displays do período
+                periodEarningsDisplaySpan.textContent = formatCurrency(periodEarnings);
+                periodRaceCountDisplaySpan.textContent = periodRaces;
+                periodAverageDisplaySpan.textContent = formatCurrency(periodAverage);
+
+                // Atualiza resumo do ciclo
+                currentGasCostSpan.textContent = formatCurrency(gasCost);
+                cycleOtherExpensesSpan.textContent = formatCurrency(totalOtherExpenses);
+                profitSpan.textContent = formatCurrency(profit);
+                lucroDiv.classList.toggle('positivo', profit >= 0);
+                lucroDiv.classList.toggle('negativo', profit < 0);
+                raceCountSpan.textContent = cumulativeRaces; // Corridas totais do ciclo
+                cycleKmDrivenSpan.textContent = `${kmDriven} KM`;
+                cycleFuelPriceSpan.textContent = fuelPrice > 0 ? formatCurrency(fuelPrice) : NA_DISPLAY;
+                cycleFuelPriceSpan.classList.toggle('na', !(fuelPrice > 0));
+
+                if (kmPerLiterValue !== null) {
+                    cycleKmPerLiterSpan.innerHTML = `${formatNumber(kmPerLiterValue)} Km/L`;
+                    cycleKmPerLiterSpan.classList.remove('na');
+                } else {
+                    cycleKmPerLiterSpan.textContent = NA_DISPLAY;
+                    cycleKmPerLiterSpan.classList.add('na');
+                }
+
+                const costPerKmFormatted = currentCostPerKmValue !== null ? formatCurrency(currentCostPerKmValue) : NA_DISPLAY;
+                cycleCostPerKmSpan.textContent = costPerKmFormatted + (currentCostPerKmValue !== null ? '/KM' : '');
+                cycleCostPerKmSpan.classList.toggle('na', currentCostPerKmValue === null);
+
+                startKmInput.value = startKM > 0 ? startKM : '';
+                endKmInput.value = endKM > 0 ? endKM : '';
+
+                // Habilita/desabilita botão Arquivar Período
+                archiveHistoryBtn.disabled = !(periodEarnings > 0 || periodRaces > 0);
+            }
+
+            function updateEarningsTable() {
+                earningsTbody.innerHTML = '';
+                // Ordena por timestamp DESC para mostrar mais recente primeiro
+                [...appState.earningsList].sort((a,b) => new Date(b.timestamp) - new Date(a.timestamp)).forEach((earning) => {
+                    const row = earningsTbody.insertRow();
+                    row.insertCell().textContent = formatDateTime(earning.timestamp);
+                    const valueCell = row.insertCell();
+                    valueCell.textContent = formatCurrency(earning.amount);
+                    valueCell.style.textAlign = 'right';
+                    const actionsCell = row.insertCell();
+                    actionsCell.classList.add('actions-cell');
+
+                    const editBtn = document.createElement('button');
+                    editBtn.classList.add('action-btn', 'edit-btn');
+                    editBtn.innerHTML = '<i class="fa-solid fa-pencil"></i>';
+                    editBtn.setAttribute('data-tooltip', 'Editar valor');
+                    editBtn.dataset.id = earning.id; // Usa o ID do banco
+                    actionsCell.appendChild(editBtn);
+
+                    const deleteBtn = document.createElement('button');
+                    deleteBtn.classList.add('action-btn', 'delete-btn');
+                    deleteBtn.innerHTML = '<i class="fa-solid fa-trash"></i>';
+                    deleteBtn.setAttribute('data-tooltip', 'Excluir corrida');
+                    deleteBtn.dataset.id = earning.id; // Usa o ID do banco
+                    actionsCell.appendChild(deleteBtn);
+                });
+                toggleHistoryTable(isHistoryVisible, false); // Atualiza visibilidade sem salvar no localStorage
+            }
+
+            function updateExpenseTable() {
+                expensesTbody.innerHTML = '';
+                [...appState.expenseList].sort((a,b) => new Date(b.timestamp) - new Date(a.timestamp)).forEach((expense) => {
+                    const row = expensesTbody.insertRow();
+                    row.insertCell().textContent = expense.category;
+                    row.insertCell().textContent = formatDateTime(expense.timestamp, true); // Inclui hora
+                    const valueCell = row.insertCell();
+                    valueCell.textContent = formatCurrency(expense.amount);
+                    valueCell.style.textAlign = 'right';
+                    const actionsCell = row.insertCell();
+                    actionsCell.classList.add('actions-cell');
+
+                    const deleteBtn = document.createElement('button');
+                    deleteBtn.classList.add('action-btn', 'delete-btn');
+                    deleteBtn.innerHTML = '<i class="fa-solid fa-trash"></i>';
+                    deleteBtn.setAttribute('data-tooltip', 'Excluir despesa');
+                    deleteBtn.dataset.id = expense.id; // Usa o ID do banco
+                    actionsCell.appendChild(deleteBtn);
+                });
+                toggleExpenseHistoryTable(isExpenseHistoryVisible, false); // Atualiza visibilidade sem salvar no localStorage
+            }
+
+            function loadArchivedList() {
+                archivedListDiv.innerHTML = '';
+                noArchivesMessage.style.display = appState.archives.length === 0 ? 'block' : 'none';
+                // Ordena pela data do arquivamento (já vem ordenado da API, mas seguro re-ordenar)
+                 [...appState.archives].sort((a, b) => new Date(b.archiveDate) - new Date(a.archiveDate)).forEach((archive) => {
+                    const itemDiv = document.createElement('div');
+                    itemDiv.classList.add('archive-item');
+
+                    const deleteBtn = document.createElement('button');
+                    deleteBtn.classList.add('delete-archive-btn');
+                    deleteBtn.innerHTML = '<i class="fa-solid fa-trash-can"></i>';
+                    deleteBtn.setAttribute('data-tooltip', 'Excluir arquivo');
+                    deleteBtn.dataset.id = archive.db_id; // Usa o ID do banco
+                    itemDiv.appendChild(deleteBtn);
+
+                    const contentDiv = document.createElement('div');
+                    contentDiv.classList.add('archive-item-content');
+                    contentDiv.dataset.id = archive.db_id; // Usa o ID do banco para buscar detalhes
+                    contentDiv.setAttribute('data-tooltip', 'Ver detalhes');
+                    contentDiv.style.cursor = 'pointer';
+
+                    const isFullCycle = archive.archiveType === "Ciclo Completo";
+                    const archiveDate = formatDateTime(archive.archiveDate);
+                    const endDate = formatDateTime(archive.periodEndDate || archive.archiveDate);
+                    const earnings = parseArchivedValue(isFullCycle ? archive.cycleEarnings : archive.periodEarnings);
+                    const races = parseArchivedValue(isFullCycle ? archive.cycleRaceCount : archive.periodRaceCount);
+                    const gas = parseArchivedValue(isFullCycle ? archive.gasCost : archive.gasCostSnapshot);
+                    const profit = parseArchivedValue(isFullCycle ? archive.summary_profit : archive.cycleProfitSnapshot);
+                    const note = archive.note || '';
+                    const profitClass = profit >= 0 ? 'positive' : 'negative';
+
+                    let contentHTML = `<p><strong><i class="fa-solid ${isFullCycle ? 'fa-calendar-check' : 'fa-calendar-day'}"></i> ${archive.archiveType}:</strong> ${archiveDate}</p>`;
+                    contentHTML += `<p><i class="fa-regular fa-clock"></i><strong>Fim:</strong> ${endDate}</p>`;
+                    contentHTML += `<p><i class="fa-solid fa-sack-dollar"></i><strong>Ganhos:</strong> ${formatCurrency(earnings)}</p>`;
+                    contentHTML += `<p><i class="fa-solid fa-route"></i><strong>Corridas:</strong> ${races}</p>`;
+                    contentHTML += `<p><i class="fa-solid fa-gas-pump"></i><strong>Gasolina:</strong> ${formatCurrency(gas)}</p>`;
+
+                    if (isFullCycle) {
+                        const otherExpenses = parseArchivedValue(archive.summary_totalOtherExpenses);
+                        const kmDriven = parseArchivedValue(archive.summary_kmDriven);
+                        const kmPerLiter = archive.summary_kmPerLiter || NA_DISPLAY;
+                        const costPerKm = archive.summary_costPerKm || NA_DISPLAY; // Já vem formatado do backend
+                        const startKm = parseArchivedValue(archive.startKM);
+                        const endKm = parseArchivedValue(archive.endKM);
+                        if (otherExpenses > 0) contentHTML += `<p><i class="fa-solid fa-receipt"></i><strong>Outras Desp.:</strong> ${formatCurrency(otherExpenses)}</p>`;
+                        if (kmDriven > 0) {
+                            contentHTML += `<p><i class="fa-solid fa-road"></i><strong>KM Rodados:</strong> ${kmDriven} KM (${startKm} - ${endKm})</p>`;
+                            if (kmPerLiter !== NA_DISPLAY) contentHTML += `<p><i class="fa-solid fa-ruler-combined"></i><strong>KM/L:</strong> ${kmPerLiter}</p>`; // Já formatado
+                            if (costPerKm !== NA_DISPLAY) contentHTML += `<p><i class="fa-solid fa-coins"></i><strong>Custo/KM:</strong> R$ ${costPerKm}</p>`; // Já formatado (adiciona R$)
+                        }
+                    }
+                    contentHTML += `<p><i class="fa-solid fa-chart-pie"></i><strong>Lucro ${isFullCycle ? 'Líquido' : '(Snap.)'}:</strong> <span class="profit-value ${profitClass}">${formatCurrency(profit)}</span></p>`;
+                    if (note) {
+                        contentHTML += `<p><i class="fa-solid fa-note-sticky"></i><strong>Nota:</strong><span class="archive-note">${note}</span></p>`;
+                    }
+                    contentDiv.innerHTML = contentHTML;
+                    itemDiv.appendChild(contentDiv);
+                    archivedListDiv.appendChild(itemDiv);
+                });
+                updateSimulatorState(); // Atualiza estado do simulador baseado nos arquivos
+            }
+
+            function checkCycleStateAndToggleUI() {
+                const isCycleActive = appState.currentCycle?.is_active || false;
+
+                startNewCycleBtn.classList.toggle('hidden', isCycleActive);
+                finalizeCycleBtn.classList.toggle('hidden', !isCycleActive);
+
+                earningTotalInput.disabled = !isCycleActive;
+                addTotalEarningBtn.disabled = !isCycleActive || earningTotalInput.value.trim() === '';
+                gasRequiredEarningMsg.style.display = isCycleActive ? 'none' : 'block';
+
+                editCurrentGasBtn.classList.toggle('hidden', !isCycleActive);
+                editFuelPriceBtn.classList.toggle('hidden', !isCycleActive);
+                editStartKmBtn.classList.toggle('hidden', !isCycleActive);
+                editEndKmBtn.classList.toggle('hidden', !isCycleActive); // Habilita edição de KM final se ciclo ativo
+
+                expenseCategorySelect.disabled = !isCycleActive;
+                expenseAmountInput.disabled = !isCycleActive;
+                addExpenseBtn.disabled = !isCycleActive || expenseAmountInput.value.trim() === '';
+
+                startKmInput.disabled = true; // Sempre desabilitado para visualização
+                endKmInput.disabled = true;   // Sempre desabilitado para visualização
+
+                // Habilitar botão de arquivar período apenas se houver dados no período
+                archiveHistoryBtn.disabled = !(appState.currentCycle?.current_period_earnings > 0 || appState.currentCycle?.current_period_race_count > 0);
+
+            }
+
+            // --- Funções de Controle da UI (Visibilidade - Mantidas com localStorage) ---
+            function toggleHistoryTable(show, shouldSave = true) {
+                earningsTable.classList.toggle('hidden', !show);
+                toggleHistoryBtn.innerHTML = show ? '<i class="fa-solid fa-eye-slash"></i> Ocultar' : '<i class="fa-solid fa-eye"></i> Mostrar';
+                isHistoryVisible = show;
+                if (shouldSave) {
+                    localStorage.setItem(storagePrefix + 'isHistoryVisible', isHistoryVisible.toString());
+                }
+            }
+            function toggleExpenseHistoryTable(show, shouldSave = true) {
+                expensesTable.classList.toggle('hidden', !show);
+                toggleExpenseHistoryBtn.innerHTML = show ? '<i class="fa-solid fa-eye-slash"></i> Ocultar' : '<i class="fa-solid fa-eye"></i> Mostrar';
+                isExpenseHistoryVisible = show;
+                if (shouldSave) {
+                    localStorage.setItem(storagePrefix + 'isExpenseHistoryVisible', isExpenseHistoryVisible.toString());
+                }
+            }
+             function toggleCycleContent(show, shouldSave = true) {
+                cycleContentWrapper.classList.toggle('hidden', !show);
+                toggleCycleContentBtn.innerHTML = show ? '<i class="fa-solid fa-eye-slash"></i> Ocultar' : '<i class="fa-solid fa-eye"></i> Mostrar';
+                isCycleContentVisible = show;
+                if (shouldSave) {
+                    localStorage.setItem(storagePrefix + 'isCycleContentVisible', isCycleContentVisible.toString());
+                }
+            }
+
+            // --- Funções de Gráficos (Modificadas para usar appState) ---
+            function initializeProfitChart() { /* ... (código mantido) ... */
+                 if (profitChartInstance) profitChartInstance.destroy();
+                 profitChartInstance = new Chart(profitChartCtx, {
+                     type: 'doughnut',
+                     data: {
+                         labels: [],
+                         datasets: [{ data: [], backgroundColor: [], borderColor: [DARK_COLORS.border], borderWidth: 3 }] },
+                     options: {
+                         responsive: true, maintainAspectRatio: false, cutout: '65%',
+                         plugins: {
+                             legend: { position: 'bottom', labels: { color: '#a0a0a5', boxWidth: 15, padding: 15 } },
+                             tooltip: {
+                                 backgroundColor: 'rgba(0,0,0,0.8)', titleColor: '#eee', bodyColor: '#eee',
+                                 callbacks: { label: ctx => `${ctx.label}: ${formatCurrency(ctx.parsed)}` } },
+                             title: { display: true, text: 'Ganhos vs. Despesas (Ciclo Atual)', font: { size: 15 }, color: '#f2f2f7', padding: { top: 10, bottom: 20 } }
+                         }
+                     }
+                 });
+             }
+            function updateProfitChart() {
+                if (!profitChartInstance) return;
+
+                const gas = appState.currentCycle?.gas_cost || 0;
+                const cycleEarn = appState.currentCycle?.cumulative_earnings || 0;
+                const totalOtherExpenses = getTotalOtherExpenses(); // Usa appState.expenseList
+                const totalExpenses = gas + totalOtherExpenses;
+                const profit = cycleEarn - totalExpenses;
+
+                let labels, data, bgColors;
+                const gasVal = Math.max(0, gas);
+                const othersVal = Math.max(0, totalOtherExpenses);
+                const earnVal = Math.max(0, cycleEarn);
+                const profitVal = Math.max(0, profit);
+
+                if (earnVal <= 0 && totalExpenses <= 0) { labels = ['Sem Dados no Ciclo']; data = [1]; bgColors = [DARK_COLORS.noData]; }
+                else if (earnVal <= 0 && totalExpenses > 0) { labels = ['Gasto Gasolina', 'Outras Despesas']; data = [gasVal, othersVal]; bgColors = [DARK_COLORS.gas, DARK_COLORS.others]; }
+                else if (profit <= 0) { labels = ['Gasto Gasolina', 'Outras Despesas', 'Ganhos (Insuf.)']; data = [gasVal, othersVal, earnVal]; bgColors = [DARK_COLORS.gas, DARK_COLORS.others, DARK_COLORS.insufficient]; }
+                 else { labels = ['Gasto Gasolina', 'Outras Despesas', 'Lucro Líquido']; data = [gasVal, othersVal, profitVal]; bgColors = [DARK_COLORS.gas, DARK_COLORS.others, DARK_COLORS.profit]; }
+
+                const filteredData = []; const filteredLabels = []; const filteredBgColors = [];
+                data.forEach((value, index) => { if (value > 0 || (labels.length === 1 && labels[0] === 'Sem Dados no Ciclo') ) { filteredData.push(value); filteredLabels.push(labels[index]); filteredBgColors.push(bgColors[index]); } });
+
+                profitChartInstance.data.labels = filteredLabels;
+                profitChartInstance.data.datasets[0].data = filteredData;
+                profitChartInstance.data.datasets[0].backgroundColor = filteredBgColors;
+                profitChartInstance.update();
+            }
+            function initializeArchivedStatsChart() { /* ... (código mantido) ... */
+                if (archivedStatsChartInstance) archivedStatsChartInstance.destroy();
+                 archivedStatsChartInstance = new Chart(archivedChartCtx, {
+                     type: 'bar',
+                     data: {
+                         labels: [],
+                         datasets: [
+                             { label: 'Ganhos (R$)', data: [], backgroundColor: 'rgba(48, 209, 88, 0.6)', borderColor: 'rgba(48, 209, 88, 1)', borderWidth: 1, yAxisID: 'y-axis-earnings' },
+                             { label: 'Nº Corridas', data: [], backgroundColor: 'rgba(10, 132, 255, 0.6)', borderColor: 'rgba(10, 132, 255, 1)', borderWidth: 1, yAxisID: 'y-axis-races' }
+                         ]
+                     },
+                     options: { /* ... (opções mantidas) ... */
+                         responsive: true, maintainAspectRatio: false,
+                         plugins: {
+                             legend: { position: 'top', labels: { color: '#a0a0a5' } },
+                             title: { display: true, text: 'Estatísticas dos Períodos Arquivados', font: { size: 16 }, color: '#f2f2f7', padding: { bottom: 20 } },
+                             tooltip: {
+                                  backgroundColor: 'rgba(0,0,0,0.8)', titleColor: '#eee', bodyColor: '#eee',
+                                 callbacks: {
+                                     label: function(context) {
+                                         let label = context.dataset.label || ''; if (label) { label += ': '; }
+                                         if (context.dataset.yAxisID === 'y-axis-earnings') { label += formatCurrency(context.parsed.y); } else { label += context.parsed.y; }
+                                         return label;
+                                     }
+                                 }
+                             }
+                         },
+                         scales: {
+                             x: { title: { display: true, text: 'Período Arquivado (Data Fim)', color: '#a0a0a5' }, ticks: { color: '#a0a0a5' }, grid: { color: 'rgba(255, 255, 255, 0.1)' } },
+                             'y-axis-earnings': { type: 'linear', position: 'left', title: { display: true, text: 'Valor (R$)', color: '#a0a0a5' }, ticks: { callback: (value) => formatCurrency(value), color: '#a0a0a5' }, grid: { color: 'rgba(255, 255, 255, 0.1)' } },
+                             'y-axis-races': { type: 'linear', position: 'right', title: { display: true, text: 'Nº Corridas', color: '#a0a0a5' }, grid: { drawOnChartArea: false }, ticks: { stepSize: 1, precision: 0, color: '#a0a0a5' } }
+                         }
+                    }
+                 });
+            }
+            function updateArchivedStatsChart() {
+                if (!archivedStatsChartInstance || !archivedChartContainer) return;
+                // Usa appState.archives
+                const sortedArchives = [...appState.archives].sort((a, b) => new Date(a.archiveDate) - new Date(b.archiveDate)); // Ordena ASC para o gráfico
+                const labels = []; const earningsData = []; const racesData = [];
+
+                sortedArchives.forEach(archive => {
+                    const isFullCycle = archive.archiveType === "Ciclo Completo";
+                    const earnings = parseArchivedValue(isFullCycle ? archive.cycleEarnings : archive.periodEarnings);
+                    const races = parseArchivedValue(isFullCycle ? archive.cycleRaceCount : archive.periodRaceCount);
+                    const labelDate = formatDateTime(archive.periodEndDate || archive.archiveDate, false) || 'N/D';
+                    labels.push(labelDate);
+                    earningsData.push(earnings);
+                    racesData.push(races);
+                });
+
+                archivedStatsChartInstance.data.labels = labels;
+                archivedStatsChartInstance.data.datasets[0].data = earningsData;
+                archivedStatsChartInstance.data.datasets[1].data = racesData;
+                archivedStatsChartInstance.update();
+                archivedChartContainer.style.display = appState.archives.length > 0 ? 'block' : 'none';
+            }
+
+            // --- Funções de Ação (Modificadas para usar API) ---
+
+            async function addOrUpdateTotalEarning() {
+                const currentPeriodEarnings = appState.currentCycle?.current_period_earnings || 0;
+                const newTotalText = earningTotalInput.value.replace(',', '.');
+                const newPeriodTotalAmount = parseFloat(newTotalText);
+
+                if (isNaN(newPeriodTotalAmount) || newPeriodTotalAmount < 0) {
+                    alert('Valor total de ganhos inválido.');
+                    earningTotalInput.focus();
+                    return;
+                }
+
+                let difference = 0;
+                let isCorrection = false; // Flag para indicar se é apenas uma correção de total
+
+                if (currentPeriodEarnings > 0) {
+                    difference = newPeriodTotalAmount - currentPeriodEarnings;
+                }
+
+                if (newPeriodTotalAmount < currentPeriodEarnings) {
+                    if (!confirm(`ATENÇÃO: O novo total (${formatCurrency(newPeriodTotalAmount)}) é MENOR que o anterior (${formatCurrency(currentPeriodEarnings)}).\n\nIsso irá CORRIGIR o total do período, mas NÃO contará como uma nova corrida.\n\nDeseja continuar?`)) {
+                        earningTotalInput.select();
+                        return;
+                    }
+                    isCorrection = true; // É uma correção, envia diferença negativa
+                } else if (newPeriodTotalAmount === currentPeriodEarnings) {
+                    alert(`O valor inserido (${formatCurrency(newPeriodTotalAmount)}) é igual ao total atual. Nenhuma alteração feita.`);
+                    earningTotalInput.value = '';
+                    earningTotalInput.focus();
+                    return;
+                } else if (currentPeriodEarnings > 0 && difference > 0) { // Adicionando a um período existente
+                    if (difference > MAX_INCREMENT) {
+                        if (!confirm(`ATENÇÃO: Aumento de ${formatCurrency(difference)} (maior que ${formatCurrency(MAX_INCREMENT)}).\nConfirmar como 1 corrida?`)) {
+                            earningTotalInput.select(); return;
+                        }
+                    } else if (difference < MIN_INCREMENT) {
+                        if (!confirm(`AVISO: Aumento de ${formatCurrency(difference)} (menor que ${formatCurrency(MIN_INCREMENT)}).\nConfirmar como 1 corrida?`)) {
+                            earningTotalInput.select(); return;
+                        }
+                    }
+                    // difference já está calculado
+                } else if (currentPeriodEarnings <= 0 && newPeriodTotalAmount > 0) { // Iniciando o período com um total
+                    if (!confirm(`Registrar ${formatCurrency(newPeriodTotalAmount)} como total inicial e 1 corrida?`)) {
+                        earningTotalInput.select();
+                        return;
+                    }
+                    difference = newPeriodTotalAmount; // O primeiro valor é a diferença
+                }
+
+                // Envia para a API
+                const payload = {
+                    amount: difference, // Envia a diferença calculada
+                    timestamp: new Date().toISOString(),
+                    new_period_total: newPeriodTotalAmount // Envia o novo total final esperado
+                };
+                const result = await fetchApi('/earnings', 'POST', payload);
+
+                if (result) {
+                    appState = result; // Atualiza TODO o estado com a resposta da API
+                    updateUIFromState();
+                    earningTotalInput.value = '';
+                    earningTotalInput.focus();
+                }
+                // Erro já foi tratado em fetchApi
+            }
+
+            async function addExpense() {
+                const category = expenseCategorySelect.value;
+                const amountText = expenseAmountInput.value.replace(',', '.');
+                const amount = parseFloat(amountText);
+
+                if (!category) { alert('Selecione uma categoria.'); expenseCategorySelect.focus(); return; }
+                if (isNaN(amount) || amount <= 0) { alert('Valor da despesa inválido.'); expenseAmountInput.focus(); return; }
+
+                const payload = {
+                    category: category,
+                    amount: amount,
+                    timestamp: new Date().toISOString()
+                };
+                const result = await fetchApi('/expenses', 'POST', payload);
+
+                if (result) {
+                    appState = result; // API retorna o estado atualizado
+                    updateUIFromState();
+                    expenseAmountInput.value = '';
+                    expenseCategorySelect.value = 'Água'; // Reseta select
+                    expenseCategorySelect.focus();
+                }
+            }
+
+            async function handleDeleteExpense(expenseId) {
+                const expenseToDelete = appState.expenseList.find(exp => exp.id === expenseId);
+                if (!expenseToDelete) return;
+
+                if (confirm(`Excluir despesa?\nCat: ${expenseToDelete.category}\nValor: ${formatCurrency(expenseToDelete.amount)}\nData: ${formatDateTime(expenseToDelete.timestamp)}`)) {
+                    const result = await fetchApi(`/expenses/${expenseId}`, 'DELETE');
+                    if (result) {
+                        appState = result; // API retorna estado atualizado
+                        updateUIFromState();
+                        alert("Despesa excluída.");
+                    }
+                }
+            }
+
+            async function archivePeriodData() {
+                // Esta função agora corresponde a arquivar o período ATUAL (parcial)
+                if (!appState.currentCycle || !appState.currentCycle.is_active) {
+                     alert("Nenhum ciclo ativo."); return;
+                }
+                 if (!(appState.currentCycle.current_period_earnings > 0 || appState.currentCycle.current_period_race_count > 0)) {
+                     alert("Sem dados neste período para arquivar."); return;
+                 }
+
+                if (!confirm("Arquivar dados de ganhos/corridas do período atual?\n\nIsso salvará um registro parcial e zerará os contadores de ganhos/corridas deste ciclo.\nO ciclo de gasolina/despesas continuará ativo.")) {
+                    return;
+                }
+
+                const note = prompt("Adicionar uma nota a este período arquivado? (Opcional)") || '';
+                const result = await fetchApi('/archives/period', 'POST', { note: note });
+
+                if (result) {
+                    appState = result; // API retorna estado atualizado
+                    updateUIFromState();
+                    alert("Período arquivado! Ganhos/corridas zerados para o ciclo atual.");
+                }
+            }
+
+            // Renomeado de handleStartNewCycle para corresponder à ação
+            async function startNewCycle() {
+                 if (appState.currentCycle?.is_active) {
+                     alert("ERRO: Finalize o ciclo atual antes de iniciar um novo.");
+                     return;
+                 }
+
+                let newGasCost = 0;
+                let newFuelPrice = null; // Permitir nulo
+                let newStartKM = null;   // Permitir nulo
+
+                let gasCostStr = prompt("--- INICIAR NOVO CICLO ---\n\n1/3: Valor TOTAL gasto com gasolina?\n(Ex: 270,00)", "");
+                if (gasCostStr === null) { alert("Início cancelado."); return; }
+                gasCostStr = gasCostStr.replace(',', '.');
+                newGasCost = parseFloat(gasCostStr);
+                while (isNaN(newGasCost) || newGasCost <= 0) {
+                    gasCostStr = prompt("Valor inválido!\n\n1/3: Valor TOTAL gasto com gasolina?\n(Ex: 270,00 - Obrigatório)", "");
+                    if (gasCostStr === null) { alert("Início cancelado."); return; }
+                    gasCostStr = gasCostStr.replace(',', '.');
+                    newGasCost = parseFloat(gasCostStr);
+                }
+
+                const fuelPriceStr = prompt(`2/3: PREÇO POR LITRO da gasolina?\n(Ex: 6.49 - Opcional, para KM/L)`, "");
+                if (fuelPriceStr !== null && fuelPriceStr.trim() !== '') {
+                    const price = parseFloat(fuelPriceStr.replace(',', '.'));
+                    if (!isNaN(price) && price > 0) {
+                        newFuelPrice = price;
+                    } else {
+                        alert("Preço/litro inválido. Cálculo de KM/L ficará indisponível (N/A).");
+                    }
+                }
+
+                const startKmStr = prompt(`3/3: QUILOMETRAGEM INICIAL?\n(Ex: 80000 - Opcional, para KM rodados)`, "");
+                if (startKmStr !== null && startKmStr.trim() !== '') {
+                    const km = parseInt(startKmStr.replace(/\D/g, ''), 10);
+                    if (!isNaN(km) && km >= 0) {
+                        newStartKM = km;
+                    } else {
+                        alert("KM inicial inválido. Cálculo de KM rodados ficará indisponível (N/A).");
+                    }
+                }
+
+                const payload = {
+                    gas_cost: newGasCost,
+                    start_km: newStartKM,
+                    fuel_price: newFuelPrice
+                };
+
+                const result = await fetchApi('/cycles/start', 'POST', payload);
+
+                if (result) {
+                    // A API de start retorna apenas o novo ciclo, precisamos recarregar o estado completo
+                    await loadInitialData(); // Recarrega todo o estado
+                     alert(`--- NOVO CICLO INICIADO ---\nGasolina: ${formatCurrency(appState.currentCycle.gas_cost)}\nPreço/L: ${appState.currentCycle.fuel_price_per_liter ? formatCurrency(appState.currentCycle.fuel_price_per_liter) : NA_DISPLAY}\nKM Inicial: ${appState.currentCycle.start_km ? appState.currentCycle.start_km + ' KM' : 'Não definido'}`);
+                    earningTotalInput.focus();
+                }
+            }
+
+            // Renomeado de handleFinalizeCycle
+            async function finalizeCycle() {
+                 if (!appState.currentCycle?.is_active) {
+                     alert("ERRO: Nenhum ciclo ativo para finalizar.");
+                     return;
+                 }
+
+                let confirmedFinalKM = appState.currentCycle.end_km; // Usa o valor atual se já existir
+                const startKM = appState.currentCycle.start_km;
+
+                // Solicita KM Final apenas se não definido ou se for menor que inicial
+                if (confirmedFinalKM === null || (startKM !== null && confirmedFinalKM < startKM) ) {
+                    let promptMessage = "--- FINALIZAR CICLO ---\n\nInsira a QUILOMETRAGEM FINAL:";
+                    let defaultValue = "";
+                    if (startKM !== null) {
+                        promptMessage += `\n(KM Inicial: ${startKM})`;
+                        defaultValue = confirmedFinalKM !== null ? confirmedFinalKM.toString() : startKM.toString();
+                        promptMessage += "\n\n(Obrigatório se KM Inicial foi definida)";
+                    } else {
+                         promptMessage += "\n(KM Inicial não definida)";
+                         defaultValue = confirmedFinalKM !== null ? confirmedFinalKM.toString() : '';
+                    }
+
+                    let validKm = false;
+                    while (!validKm) {
+                        const kmFinalStr = prompt(promptMessage, defaultValue);
+                        if (kmFinalStr === null) { // Cancelou
+                            if (startKM !== null && !confirm("Cancelou a inserção do KM Final.\nCálculos de KM podem ficar incorretos/zerados.\nFinalizar mesmo assim?")) {
+                                alert("Finalização cancelada."); return;
+                            } else {
+                                // Permite finalizar sem KM final ou com KM final inválido (backend usará start_km como default)
+                                confirmedFinalKM = startKM; // Ou null se startKM for null
+                                validKm = true;
+                            }
+                        } else { // Inseriu algo
+                             const kmNum = parseInt(kmFinalStr.replace(/\D/g, ''), 10);
+                             if (!isNaN(kmNum)) {
+                                 if (startKM !== null && kmNum < startKM) {
+                                     alert(`KM Final (${kmNum}) não pode ser menor que Inicial (${startKM}).`);
+                                     defaultValue = kmFinalStr; // Mantém o valor inválido para correção
+                                 } else {
+                                     confirmedFinalKM = kmNum; // KM válido
+                                     validKm = true;
+                                 }
+                             } else {
+                                 alert(`Valor inválido para KM final.`);
+                                defaultValue = kmFinalStr;
+                             }
+                         }
+                    } // Fim while
+                 } // Fim if precisa de KM
+
+                const note = prompt("Adicionar uma nota a este ciclo arquivado? (Opcional)") || '';
+
+                const payload = {
+                    end_km: confirmedFinalKM,
+                    note: note
+                };
+
+                const result = await fetchApi('/cycles/finalize', 'POST', payload);
+
+                if (result) {
+                    appState = result; // API retorna o novo estado (ciclo inativo, listas vazias, arquivos atualizados)
+                    updateUIFromState();
+                    alert("Ciclo finalizado e arquivado!");
+                }
+            }
+
+             // Funções de Edição (agora chamam a API)
+             async function editCycleField(fieldName, promptMessage, currentValueFormatted, inputType = 'number') {
+                 if (!appState.currentCycle?.is_active) {
+                     alert("Nenhum ciclo ativo.");
+                     return;
+                 }
+
+                 const newValueStr = prompt(promptMessage, currentValueFormatted);
+                 if (newValueStr === null) return; // Cancelado
+
+                 let newValue;
+                 let payload = {};
+
+                 try {
+                     if (inputType === 'km') {
+                         newValue = parseInt(newValueStr.replace(/\D/g, ''), 10);
+                         if (isNaN(newValue) || newValue < 0) throw new Error("Valor de KM inválido.");
+                         // Validação extra (inicio > fim ou fim < inicio) será feita no backend
+                     } else { // Assume moeda/decimal
+                         newValue = parseFloat(newValueStr.replace(',', '.'));
+                          if (isNaN(newValue) || newValue < 0) throw new Error("Valor numérico inválido.");
+                     }
+
+                    // Prepara o payload correto para a API unificada
+                    if (fieldName === 'gas_cost') payload.gas_cost = newValue;
+                    else if (fieldName === 'fuel_price') payload.fuel_price = newValue > 0 ? newValue : null; // Envia null se zerado
+                    else if (fieldName === 'start_km') payload.start_km = newValue;
+                    else if (fieldName === 'end_km') payload.end_km = newValue;
+                    else return; // Campo desconhecido
+
+                     // Chama a API unificada
+                     const result = await fetchApi('/cycles/current', 'PUT', payload);
+
+                     if (result) {
+                         appState = result; // Atualiza com a resposta
+                         updateUIFromState();
+                         alert(`Campo atualizado com sucesso.`);
+                     }
+                 } catch (error) {
+                     alert(`Erro: ${error.message}`);
+                 }
+             }
+
+            function editCurrentGasCost() {
+                 const currentVal = appState.currentCycle?.gas_cost || 0;
+                 editCycleField('gas_cost', `Corrigir gasto com GASOLINA:\n(Atual: ${formatCurrency(currentVal)})`, currentVal.toFixed(2).replace('.', ','));
+            }
+            function editCurrentFuelPrice() {
+                 const currentVal = appState.currentCycle?.fuel_price_per_liter || 0;
+                 const formattedVal = currentVal > 0 ? currentVal.toFixed(2).replace('.', ',') : '';
+                 editCycleField('fuel_price', `Corrigir PREÇO POR LITRO:\n(Atual: ${formatCurrency(currentVal) || NA_DISPLAY})`, formattedVal);
+            }
+            function editCycleStartKM() {
+                 const currentVal = appState.currentCycle?.start_km || '';
+                 editCycleField('start_km', `Corrigir KM INICIAL:\n(Atual: ${currentVal || 'N/D'})`, String(currentVal), 'km');
+            }
+            function editCycleEndKM() {
+                 const currentVal = appState.currentCycle?.end_km || '';
+                 editCycleField('end_km', `Corrigir KM FINAL:\n(Atual: ${currentVal || 'N/D'})`, String(currentVal), 'km');
+            }
+
+
+            async function handleDeleteEntry(earningId) {
+                const entryToDelete = appState.earningsList.find(e => e.id === earningId);
+                 if (!entryToDelete) return;
+
+                 if (confirm(`Excluir corrida?\nValor: ${formatCurrency(entryToDelete.amount)}\nData: ${formatDateTime(entryToDelete.timestamp)}`)) {
+                    const result = await fetchApi(`/earnings/${earningId}`, 'DELETE');
+                     if (result) {
+                        appState = result; // API retorna estado atualizado
+                         updateUIFromState();
+                         alert("Corrida excluída.");
+                     }
+                 }
+             }
+
+            async function handleEditEntry(earningId) {
+                 const entryToEdit = appState.earningsList.find(e => e.id === earningId);
+                 if (!entryToEdit) return;
+
+                 const oldAmount = entryToEdit.amount;
+                 const newValueStr = prompt(`Editar valor da corrida:\n(Atual: ${formatCurrency(oldAmount)}, Data: ${formatDateTime(entryToEdit.timestamp)})`, oldAmount.toFixed(2).replace('.', ','));
+                 if (newValueStr === null) return;
+
+                 const newAmount = parseFloat(newValueStr.replace(',', '.'));
+                 if (isNaN(newAmount) || newAmount < 0) {
+                     alert("Valor inválido."); return;
+                 }
+                 if (newAmount === oldAmount) return;
+
+                 const result = await fetchApi(`/earnings/${earningId}`, 'PUT', { amount: newAmount });
+
+                 if (result) {
+                     appState = result; // API retorna estado atualizado
+                     updateUIFromState();
+                     alert("Valor da corrida atualizado.");
+                 }
+             }
+
+            function showArchiveDetails(archiveId) {
+                // Encontra o arquivo no estado local pelo ID do banco
+                const archive = appState.archives.find(a => a.db_id === archiveId);
+                if (!archive) {
+                    console.error("Arquivo não encontrado no estado local:", archiveId);
+                    alert("Erro ao carregar detalhes do arquivo.");
+                    return;
+                }
+                currentArchiveIndex = archiveId; // Guarda o ID para possível exclusão
+
+                const isFullCycle = archive.archiveType === "Ciclo Completo";
+                const archiveDate = formatDateTime(archive.archiveDate);
+                const endDate = formatDateTime(archive.periodEndDate || archive.archiveDate);
+                const earnings = parseArchivedValue(isFullCycle ? archive.cycleEarnings : archive.periodEarnings);
+                const races = parseArchivedValue(isFullCycle ? archive.cycleRaceCount : archive.periodRaceCount);
+                const gas = parseArchivedValue(isFullCycle ? archive.gasCost : archive.gasCostSnapshot);
+                const profit = parseArchivedValue(isFullCycle ? archive.summary_profit : archive.cycleProfitSnapshot);
+                const note = archive.note || '';
+                const profitClass = profit >= 0 ? 'positive' : 'negative';
+                const earningsDetails = archive.earningsDetails || []; // Detalhes das corridas DENTRO do arquivo JSON
+                const expensesList = archive.expensesList || []; // Detalhes das despesas DENTRO do arquivo JSON (se ciclo completo)
+
+                modalTitleSpan.textContent = `Detalhes: ${archive.archiveType} (${endDate})`;
+
+                let summaryHTML = `<p><strong>Tipo:</strong> ${archive.archiveType}</p>`;
+                summaryHTML += `<p><strong>Arquivado:</strong> ${archiveDate}</p>`;
+                summaryHTML += `<p><strong>Encerrado:</strong> ${endDate}</p>`;
+                summaryHTML += `<p><strong>${isFullCycle ? 'Ganhos Totais:' : 'Ganhos (Período):'}</strong> ${formatCurrency(earnings)}</p>`;
+                summaryHTML += `<p><strong>${isFullCycle ? 'Corridas Totais:' : 'Corridas (Período):'}</strong> ${races}</p>`;
+                summaryHTML += `<p><strong>Gasto Gasolina:</strong> ${formatCurrency(gas)}</p>`;
+
+                if (isFullCycle) {
+                    const otherExpenses = parseArchivedValue(archive.summary_totalOtherExpenses);
+                    const kmDriven = parseArchivedValue(archive.summary_kmDriven);
+                    const kmPerLiter = archive.summary_kmPerLiter || NA_DISPLAY;
+                    const costPerKm = archive.summary_costPerKm || NA_DISPLAY; // Vem formatado como string
+                    const fuelPrice = parseArchivedValue(archive.fuelPricePerLiter);
+                    const startKm = parseArchivedValue(archive.startKM);
+                    const endKm = parseArchivedValue(archive.endKM);
+                    if (otherExpenses > 0) summaryHTML += `<p><strong>Outras Despesas:</strong> ${formatCurrency(otherExpenses)}</p>`;
+                    if (fuelPrice > 0) summaryHTML += `<p><strong>Preço Gasolina (L):</strong> ${formatCurrency(fuelPrice)}</p>`;
+                    if (kmDriven > 0) {
+                        summaryHTML += `<p><strong>KM Rodados:</strong> ${kmDriven} KM (${startKm} - ${endKm})</p>`;
+                        summaryHTML += `<p><strong>KM / Litro:</strong> ${kmPerLiter}</p>`; // String N/A ou formatado
+                        summaryHTML += `<p><strong>Custo / KM:</strong> R$ ${costPerKm}</p>`; // String N/A ou formatado (adiciona R$)
+                    }
+                }
+                summaryHTML += `<p><strong>${isFullCycle ? 'Lucro Líquido:' : 'Lucro Ciclo (Snap.):'}</strong> <span class="profit-value ${profitClass}">${formatCurrency(profit)}</span></p>`;
+                if (note) {
+                    summaryHTML += `<p><strong>Nota:</strong><span class="modal-note">${note}</span></p>`;
+                }
+                modalSummaryDiv.innerHTML = summaryHTML;
+
+                // Preenche tabela de corridas (se houver detalhes)
+                modalTbody.innerHTML = ''; // Limpa antes
+                if (earningsDetails.length > 0) {
+                    earningsDetails.forEach(earning => {
+                        const row = modalTbody.insertRow();
+                        row.insertCell().textContent = formatDateTime(earning.timestamp);
+                        const valueCell = row.insertCell();
+                        valueCell.textContent = formatCurrency(earning.amount || 0);
+                    });
+                    modalRunsTitle.style.display = 'flex';
+                    modalDetailsTableContainer.style.display = 'block';
+                } else {
+                    modalRunsTitle.style.display = 'none';
+                    modalDetailsTableContainer.style.display = 'none';
+                }
+
+                // Preenche tabela de despesas (se for ciclo completo e houver despesas)
+                modalExpensesTbody.innerHTML = ''; // Limpa antes
+                if (isFullCycle && expensesList.length > 0) {
+                     expensesList.forEach(expense => {
+                         const row = modalExpensesTbody.insertRow();
+                         row.insertCell().textContent = expense.category;
+                         row.insertCell().textContent = formatDateTime(expense.timestamp); // Já vem com hora
+                         const valueCell = row.insertCell();
+                         valueCell.textContent = formatCurrency(expense.amount);
+                     });
+                    modalExpensesTitle.style.display = 'flex';
+                     modalExpensesTableContainer.style.display = 'block';
+                 } else {
+                    modalExpensesTitle.style.display = 'none';
+                     modalExpensesTableContainer.style.display = 'none';
+                 }
+
+                modal.style.display = 'block';
+            }
+
+            function closeModal() {
+                modal.style.display = 'none';
+                currentArchiveIndex = -1; // Reseta o índice do modal
+            }
+
+            async function handleDeleteArchive(archiveId) {
+                 const archiveToDelete = appState.archives.find(a => a.db_id === archiveId);
+                 if (!archiveToDelete) return;
+
+                 const archiveDate = formatDateTime(archiveToDelete.archiveDate);
+                 const archiveType = archiveToDelete.archiveType || '?';
+                 let confirmationMessage = `Excluir permanentemente ${archiveType} de ${archiveDate}?\n\nIrreversível.`;
+
+                 // Aviso sobre não reajustar ciclo ativo (simplificação)
+                 if (archiveToDelete.archiveType === "Período Parcial" && appState.currentCycle?.is_active) {
+                     confirmationMessage += `\n\n(Nota: A exclusão deste arquivo NÃO reajustará os totais do ciclo atualmente ativo).`;
+                 }
+
+                 if (!confirm(confirmationMessage)) return;
+
+                 const result = await fetchApi(`/archives/${archiveId}`, 'DELETE');
+
+                 if (result) {
+                     appState.archives = result.archives; // API retorna a lista atualizada
+                     updateUIFromState(); // Atualiza lista e gráfico
+                     alert(result.message || "Arquivo excluído.");
+                     if (currentArchiveIndex === archiveId) {
+                        closeModal(); // Fecha o modal se o arquivo excluído estava aberto
+                     }
+                 }
+            }
+
+            async function handleResetApplication() {
+                 if (!confirm("⚠️ ATENÇÃO! ⚠️\n\nApagar TODOS os dados do SERVIDOR?\n\nIRREVERSÍVEL!")) return;
+                 if (!confirm("‼️ ÚLTIMA CHANCE! ‼️\n\nCONFIRMAR exclusão total e permanente de TODOS os ciclos, corridas, despesas e arquivos?")) return;
+
+                 // Chama a API de reset
+                 const result = await fetchApi('/reset', 'POST');
+
+                 if (result) {
+                     alert(result.message || "Dados resetados no servidor.");
+                     // Recarrega o estado inicial do frontend
+                     await loadInitialData();
+                 }
+                 // Se falhar, o erro é mostrado pelo fetchApi
+             }
+
+             // --- Simulador (Lógica mantida no frontend) ---
+             function getCostPerKmForSimulation() {
+                 // 1. Tenta pegar do ciclo atual COMPLETO (com KM final definido)
+                 const cycle = appState.currentCycle;
+                 if (cycle && cycle.is_active && cycle.end_km !== null && cycle.end_km >= (cycle.start_km || 0)) {
+                     const kmDriven = calculateKmDriven(cycle.start_km, cycle.end_km);
+                     const totalOtherExpenses = getTotalOtherExpenses();
+                     const costKmCurrent = calculateCostPerKmValue(cycle.gas_cost, totalOtherExpenses, kmDriven);
+                     if (costKmCurrent !== null && costKmCurrent > 0) {
+                          // console.log("Simulador usando Custo/KM do ciclo ATUAL finalizado.");
+                          return { value: costKmCurrent, source: 'current_cycle_temp', date: null };
+                      }
+                 }
+
+                 // 2. Tenta pegar do último arquivo de Ciclo Completo
+                 const completedCycles = appState.archives
+                    .filter(a => a.archiveType === 'Ciclo Completo' && a.summary_costPerKm && a.summary_costPerKm !== NA_DISPLAY)
+                    .sort((a, b) => new Date(b.archiveDate) - new Date(a.archiveDate)); // Mais recente primeiro
+
+                 if (completedCycles.length > 0) {
+                     const lastCompleted = completedCycles[0];
+                     // summary_costPerKm vem como string formatada do backend
+                     const costKmValue = parseCurrencyString(lastCompleted.summary_costPerKm);
+                     if (costKmValue !== null && costKmValue > 0) {
+                        // console.log("Simulador usando Custo/KM do último ciclo COMPLETO arquivado.");
+                         return { value: costKmValue, source: 'last_completed', date: formatDateTime(lastCompleted.periodEndDate || lastCompleted.archiveDate, false) };
+                     }
+                 }
+                 // console.log("Simulador: Custo/KM não disponível.");
+                 return null; // Nenhum custo/km válido encontrado
+             }
+
+             function updateSimulatorState() {
+                 const costData = getCostPerKmForSimulation();
+                 simulateCostBtn.disabled = (costData === null);
+                 if(costData === null && simulationResultP.textContent !== '') { // Limpa resultado se ficou indisponível
+                      simulationResultP.innerHTML = '';
+                 }
+             }
+
+             function simulateCost() {
+                 const costData = getCostPerKmForSimulation();
+                 if (costData === null) {
+                     simulationResultP.innerHTML = `Custo/KM indisponível.<br><span class="source-info">Finalize um ciclo com KM inicial/final ou verifique arquivos.</span>`;
+                     simulationResultP.style.color = 'var(--warning-color)';
+                     return;
+                 }
+
+                 const kmText = simulationKmInput.value;
+                 const km = parseFloat(kmText.replace(',', '.'));
+                 if (isNaN(km) || km <= 0) {
+                     simulationResultP.textContent = "Insira uma distância válida em KM.";
+                     simulationResultP.style.color = 'var(--danger-color)';
+                     return;
+                 }
+
+                 const simulatedCost = km * costData.value;
+                 let sourceInfo = '';
+                 if (costData.source === 'last_completed') {
+                     sourceInfo = `(Base: Último ciclo completo - ${costData.date})`;
+                 } else if (costData.source === 'current_cycle_temp') {
+                     sourceInfo = `(Base: Ciclo atual - Custo/KM pode mudar)`;
+                 }
+                 simulationResultP.innerHTML = `Custo para ${formatNumber(km, 1)} KM: ${formatCurrency(simulatedCost)}<br><span class="source-info">${sourceInfo}</span>`;
+                 simulationResultP.style.color = 'var(--primary-color)';
+             }
+
+
+            // --- Inicialização ---
+            async function loadInitialData() {
+                console.log("Carregando dados iniciais da API...");
+                const initialState = await fetchApi('/state');
+                if (initialState) {
+                    appState = initialState; // Preenche todo o estado inicial
+                    console.log("Dados iniciais carregados:", appState);
+                    updateUIFromState(); // Atualiza toda a UI com os dados recebidos
+                } else {
+                    console.error("Falha ao carregar dados iniciais. Aplicação pode não funcionar corretamente.");
+                    // Poderia mostrar uma mensagem de erro mais persistente na UI
+                }
+            }
+
+            // --- Bind de Eventos (Listeners) ---
+            addTotalEarningBtn.addEventListener('click', addOrUpdateTotalEarning);
+            earningTotalInput.addEventListener('input', () => {
+                const isCycleActive = appState.currentCycle?.is_active || false;
+                addTotalEarningBtn.disabled = !isCycleActive || earningTotalInput.value.trim() === '';
+            });
+            earningTotalInput.addEventListener('keypress', (e) => { if (e.key === 'Enter' && !addTotalEarningBtn.disabled) { e.preventDefault(); addOrUpdateTotalEarning(); }});
+
+            startNewCycleBtn.addEventListener('click', startNewCycle); // Renomeado
+            finalizeCycleBtn.addEventListener('click', finalizeCycle); // Renomeado
+
+            editCurrentGasBtn.addEventListener('click', editCurrentGasCost);
+            editFuelPriceBtn.addEventListener('click', editCurrentFuelPrice);
+            editStartKmBtn.addEventListener('click', editCycleStartKM);
+            editEndKmBtn.addEventListener('click', editCycleEndKM);
+
+            toggleHistoryBtn.addEventListener('click', () => toggleHistoryTable(!isHistoryVisible));
+            toggleCycleContentBtn.addEventListener('click', () => toggleCycleContent(!isCycleContentVisible));
+            toggleExpenseHistoryBtn.addEventListener('click', () => toggleExpenseHistoryTable(!isExpenseHistoryVisible));
+
+            archiveHistoryBtn.addEventListener('click', archivePeriodData); // Renomeado
+
+            addExpenseBtn.addEventListener('click', addExpense);
+            expenseAmountInput.addEventListener('input', () => {
+                const isCycleActive = appState.currentCycle?.is_active || false;
+                addExpenseBtn.disabled = !isCycleActive || expenseAmountInput.value.trim() === '';
+            });
+            expenseAmountInput.addEventListener('keypress', (e) => { if (e.key === 'Enter' && !addExpenseBtn.disabled) { e.preventDefault(); addExpense(); }});
+
+            expensesTbody.addEventListener('click', (event) => {
+                const targetButton = event.target.closest('.delete-btn');
+                if (targetButton) {
+                    const expenseId = parseInt(targetButton.dataset.id, 10);
+                    if (!isNaN(expenseId)) {
+                        handleDeleteExpense(expenseId);
+                    }
+                }
+            });
+
+            earningsTbody.addEventListener('click', (event) => {
+                 const targetButton = event.target.closest('.action-btn');
+                 if (!targetButton) return;
+                 const earningId = parseInt(targetButton.dataset.id, 10);
+                 if (isNaN(earningId)) return;
+
+                 if (targetButton.classList.contains('delete-btn')) {
+                     handleDeleteEntry(earningId);
+                 } else if (targetButton.classList.contains('edit-btn')) {
+                     handleEditEntry(earningId);
+                 }
+             });
+
+            archivedListDiv.addEventListener('click', (event) => {
+                 const deleteButton = event.target.closest('.delete-archive-btn');
+                 const contentArea = event.target.closest('.archive-item-content');
+                 if (deleteButton) {
+                     const archiveId = parseInt(deleteButton.dataset.id, 10);
+                     if (!isNaN(archiveId)) {
+                         handleDeleteArchive(archiveId);
+                     }
+                 } else if (contentArea) {
+                     const archiveId = parseInt(contentArea.dataset.id, 10);
+                     if (!isNaN(archiveId)) {
+                         showArchiveDetails(archiveId);
+                     }
+                 }
+             });
+
+            modalCloseBtn.addEventListener('click', closeModal);
+            window.addEventListener('click', (event) => { if (event.target == modal) { closeModal(); } });
+            window.addEventListener('keydown', (event) => { if (event.key === 'Escape' && modal.style.display === 'block') { closeModal(); } });
+
+            resetAppBtn.addEventListener('click', handleResetApplication);
+
+            simulateCostBtn.addEventListener('click', simulateCost);
+            simulationKmInput.addEventListener('keypress', (e) => { if (e.key === 'Enter' && !simulateCostBtn.disabled) { e.preventDefault(); simulateCost(); }});
+
+            // --- Inicialização da Aplicação ---
+            console.log("Inicializando App Ubeleza Calculadora v4.20.5 (com Backend)...");
+            initializeProfitChart();
+            initializeArchivedStatsChart();
+            loadInitialData(); // Busca dados da API ao carregar
+            toggleCycleContent(isCycleContentVisible, false); // Aplica estado da UI
+            toggleHistoryTable(isHistoryVisible, false);
+            toggleExpenseHistoryTable(isExpenseHistoryVisible, false);
+            console.log("App inicializado, aguardando dados da API...");
+
+        });
+    </script>
+
+</body>
+</html>
+```
+
+---------------------------------------------------------------------------------------------------------------------------
+
+**Arquivo 7: `README.md` (Instruções)**
+
+```markdown
+# Ubeleza Calculadora v4.20.5 (Full-Stack com Flask e PostgreSQL)
+
+Este projeto é uma calculadora financeira para motoristas, refatorada para usar um backend Python/Flask e um banco de dados PostgreSQL.
+
+## Estrutura
+
+*   `/backend`: Contém o código da API Flask.
+*   `/frontend`: Contém o arquivo `Uber_contas.html` (interface do usuário).
+
+## Pré-requisitos
+
+*   **Python 3.8+** e **pip**: [https://www.python.org/](https://www.python.org/)
+*   **PostgreSQL**: Um servidor PostgreSQL instalado e rodando. [https://www.postgresql.org/](https://www.postgresql.org/)
+*   **Git** (opcional, para controle de versão): [https://git-scm.com/](https://git-scm.com/)
+*   **Navegador Web Moderno** (Chrome, Firefox, Edge, etc.)
+
+## Configuração do Banco de Dados PostgreSQL
+
+1.  **Instale o PostgreSQL** se ainda não o tiver.
+2.  **Crie um banco de dados** para a aplicação (você pode usar o `psql` ou uma ferramenta gráfica como pgAdmin):
+    ```sql
+    CREATE DATABASE db_ubeleza;
+    ```
+3.  **Crie um usuário** (role) para a aplicação e dê a ele permissões no banco de dados criado. **Lembre-se de usar uma senha segura!**
+    ```sql
+    CREATE USER user_ubeleza WITH PASSWORD 'password_ubeleza';
+    GRANT ALL PRIVILEGES ON DATABASE db_ubeleza TO user_ubeleza;
+    ```
+    *Substitua `user_ubeleza` e `password_ubeleza` se desejar.*
+
+## Configuração e Execução do Projeto
+
+1.  **Clone o Repositório** (se estiver usando Git) ou baixe e extraia os arquivos para uma pasta (ex: `ubeleza-calculadora`).
+
+2.  **Navegue até a pasta `backend`** no seu terminal:
+    ```bash
+    cd caminho/para/ubeleza-calculadora/backend
+    ```
+
+3.  **Crie e Ative um Ambiente Virtual** (altamente recomendado):
+    ```bash
+    # No Windows
+    python -m venv venv
+    .\venv\Scripts\activate
+
+    # No macOS/Linux
+    python3 -m venv venv
+    source venv/bin/activate
+    ```
+    *(Você verá `(venv)` no início do prompt do terminal se estiver ativo).*
+
+4.  **Instale as Dependências Python:**
+    ```bash
+    pip install -r requirements.txt
+    ```
+
+5.  **Configure as Variáveis de Ambiente:**
+    *   Crie um arquivo chamado `.env` dentro da pasta `backend`.
+    *   Copie o conteúdo abaixo para o arquivo `.env`:
+        ```dotenv
+        # Formato: postgresql://usuario:senha@host:porta/nome_banco
+        DATABASE_URL=postgresql://user_ubeleza:password_ubeleza@localhost:5432/db_ubeleza
+
+        # Gere uma chave secreta forte (ex: python -c 'import secrets; print(secrets.token_hex(16))')
+        SECRET_KEY=coloque_sua_chave_secreta_forte_aqui
+        ```
+    *   **IMPORTANTE:** Atualize `DATABASE_URL` com o usuário, senha, host (geralmente `localhost`), porta (geralmente `5432`) e nome do banco que você criou no PostgreSQL.
+    *   **IMPORTANTE:** Substitua `coloque_sua_chave_secreta_forte_aqui` por uma chave secreta real e segura.
+
+6.  **Aplique as Migrações do Banco de Dados:**
+    *   (Primeira vez apenas) Inicialize o sistema de migração:
+        ```bash
+        flask db init
+        ```
+    *   Gere o script de migração inicial baseado nos `models.py`:
+        ```bash
+        flask db migrate -m "Initial migration."
+        ```
+    *   Aplique a migração ao banco de dados (isso criará as tabelas):
+        ```bash
+        flask db upgrade
+        ```
+    *   *Se você modificar os `models.py` no futuro, repita os comandos `flask db migrate` e `flask db upgrade`.*
+
+7.  **Execute o Servidor Flask (Backend):**
+    ```bash
+    flask run
+    ```
+    *   O terminal mostrará que o servidor está rodando, geralmente em `http://127.0.0.1:5000/`. Mantenha este terminal aberto.
+
+8.  **Abra o Frontend:**
+    *   Navegue até a pasta `frontend`.
+    *   Abra o arquivo `Uber_contas.html` diretamente no seu navegador web (clique duas vezes nele ou use o menu "Abrir Arquivo" do navegador).
+
+## Como Funciona
+
+*   O backend Flask agora lida com toda a persistência de dados no PostgreSQL.
+*   O frontend (`Uber_contas.html`) foi modificado para:
+    *   Não usar mais o `localStorage` para dados principais (ciclos, corridas, despesas, arquivos).
+    *   Carregar o estado inicial fazendo uma requisição `GET /api/state` ao backend.
+    *   Enviar requisições (POST, PUT, DELETE) para a API Flask sempre que uma ação que modifica dados é realizada (adicionar corrida, iniciar ciclo, arquivar, etc.).
+    *   Atualizar a interface do usuário com base na resposta recebida da API.
+*   O `localStorage` ainda é usado no frontend para salvar o estado da UI (visibilidade das tabelas, etc.), pois isso não precisa ir para o backend.
+
+## Solução de Problemas
+
+*   **Erro de CORS:** Se o frontend reclamar sobre CORS, verifique se `CORS(app)` está presente em `backend/app.py` e se o servidor Flask foi reiniciado após adicionar/modificar.
+*   **Erro de Conexão com Banco:** Verifique se o servidor PostgreSQL está rodando e se a `DATABASE_URL` no arquivo `.env` está correta (usuário, senha, host, porta, nome do banco).
+*   **Erro 500 Internal Server Error:** Verifique o log no terminal onde o `flask run` está executando. Ele geralmente mostra detalhes sobre erros no código Python.
+*   **API não responde:** Verifique se o servidor Flask está rodando (`flask run`) e se a `API_BASE_URL` no arquivo `Uber_contas.html` (`<script>` tag) está correta (`http://127.0.0.1:5000/api`).
+```
+
+---------------------------------------------------------------------------------------------------------------------------
+
+**Instruções Finais:**
+
+1.  **Crie a estrutura de pastas** (`ubeleza-calculadora`, `backend`, `frontend`).
+2.  **Salve cada bloco de código** nos arquivos correspondentes dentro da estrutura. Crie o arquivo `.env` manualmente no backend.
+3.  **Siga as instruções do `README.md`** cuidadosamente para configurar o banco de dados, instalar dependências e executar a aplicação.
+
+Agora você tem uma base sólida com frontend e backend separados. O código frontend ficou mais complexo por causa das chamadas assíncronas à API, mas a lógica de negócio principal e o armazenamento estão agora no backend, tornando a aplicação muito mais robusta e preparada para futuras expansões (como múltiplos usuários, acesso via celular, etc.).
