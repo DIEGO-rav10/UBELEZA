@@ -7,7 +7,6 @@
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" integrity="sha512-DTOQO9RWCH3ppGqcWaEA1BIZOC6xxalwEsw9c2QQeAIftl+Vegovlnee1c9QX4TctnWMn13TZye+giMm8e2LwA==" crossorigin="anonymous" referrerpolicy="no-referrer" />
     <style>
-        /* ESTILOS CSS COMPLETOS */
         :root {
             --primary-color: #0a84ff;
             --primary-hover: #007aff;
@@ -410,7 +409,7 @@
             box-shadow: var(--box-shadow-light); position: relative; transition: box-shadow 0.2s ease, transform 0.2s ease;
         }
         .archive-item:hover { box-shadow: 0 8px 25px rgba(0,0,0,0.4); transform: translateY(-3px); }
-        .archive-item-content { padding: 25px; cursor: pointer; position: relative; } /* position: relative é importante para o z-index do botão funcionar */
+        .archive-item-content { padding: 25px; cursor: pointer; position: relative; }
         .archive-item p { margin: 10px 0; font-size: 1.0em; display: flex; align-items: flex-start; color: var(--text-color-light); }
         .archive-item p i { margin-right: 12px; color: var(--icon-color); width: 18px; text-align: center; margin-top: 3px; flex-shrink: 0; }
         .archive-item p strong { font-weight: 600; display: inline-block; min-width: 115px; color: var(--text-color-medium); flex-shrink: 0; }
@@ -418,16 +417,11 @@
         .archive-item .profit-value { font-weight: 700; font-size: 1.1em;}
         .archive-item .profit-value.positive { color: var(--success-color); text-shadow: 0 0 3px var(--success-color);}
         .archive-item .profit-value.negative { color: var(--danger-color); text-shadow: 0 0 3px var(--danger-color);}
-
-        /* *** CORREÇÃO Z-INDEX *** */
         .delete-archive-btn {
             position: absolute; top: 10px; right: 10px; background: none; border: none; color: var(--icon-color);
             font-size: 1.1em; cursor: pointer; padding: 5px; line-height: 1; border-radius: 50%;
             width: 34px; height: 34px; display: flex; justify-content: center; align-items: center; transition: background-color 0.2s, color 0.2s;
-            z-index: 10; /* Garante que o botão esteja acima do conteúdo */
         }
-        /* *** FIM DA CORREÇÃO Z-INDEX *** */
-
         .delete-archive-btn:hover { background-color: rgba(255, 69, 58, 0.2); color: var(--danger-color); }
 
         .modal { display: none; position: fixed; z-index: 1000; left: 0; top: 0; width: 100%; height: 100%; overflow: auto; background-color: var(--overlay-color); padding-top: 5%; animation: fadeIn 0.3s ease; }
@@ -805,7 +799,7 @@
             const toggleCycleContentBtn = document.getElementById('toggle-cycle-content-btn');
             const cycleContentWrapper = document.getElementById('cycle-content-wrapper');
 
-            // *** CORREÇÃO ANTERIOR: Mover para DENTRO do DOMContentLoaded ***
+            // *** CORREÇÃO: Mover para DENTRO do DOMContentLoaded ***
             const profitChartCtx = document.getElementById('profitChart')?.getContext('2d'); // Adicionado '?' para segurança
             const archivedChartCtx = document.getElementById('archivedStatsChart')?.getContext('2d'); // Adicionado '?' para segurança
 
@@ -872,41 +866,20 @@
                 try {
                     // console.log(`API Request: ${method} ${url}`, body ? body : ''); // Log para debug
                     const response = await fetch(url, options);
+                    const responseData = await response.json(); // Tenta parsear JSON mesmo em erro
+                    // console.log(`API Response: ${response.status}`, responseData); // Log para debug
 
-                    // *** Tentativa de Log mais detalhado do erro 404/500 ***
                     if (!response.ok) {
-                        let responseText = null;
-                        try {
-                            // Tenta ler a resposta como texto para ver se é HTML ou outra coisa
-                            responseText = await response.text();
-                            console.error(`API Response Text (Error ${response.status}):`, responseText);
-                        } catch (textError) {
-                            console.error("Não foi possível ler o corpo da resposta como texto.", textError);
-                        }
-
-                        let responseData = null;
-                        try {
-                             // Tenta parsear como JSON (pode falhar se for HTML)
-                             responseData = JSON.parse(responseText || '{}'); // Usa texto se disponível
-                        } catch (jsonError) {
-                             // Ignora erro de JSON se já logamos o texto
-                             console.warn("Resposta não era JSON válido.");
-                        }
-
-                        const errorMessage = responseData?.error || responseText || `Erro ${response.status}: ${response.statusText}`;
+                        // Tenta exibir a mensagem de erro do backend, senão uma genérica
+                        const errorMessage = responseData?.error || `Erro ${response.status}: ${response.statusText}`;
                         console.error("API Error:", errorMessage);
-                        alert(`Erro na comunicação com o servidor:\n${errorMessage.substring(0, 300)}${errorMessage.length > 300 ? '...' : ''}`); // Limita tamanho do alerta
+                        alert(`Erro na comunicação com o servidor:\n${errorMessage}`);
                         return null; // Indica falha
                     }
-
-                    const responseData = await response.json(); // Se response.ok, deve ser JSON
-                    // console.log(`API Response: ${response.status}`, responseData); // Log para debug
                     return responseData; // Retorna os dados em caso de sucesso
-
                 } catch (error) {
-                    // Erros de rede (servidor offline, DNS, CORS bloqueado pelo navegador ANTES da resposta)
-                    console.error(`Falha na requisição (Erro de Rede/CORS?) para ${method} ${url}:`, error);
-                    alert(`Erro de rede ou falha ao conectar com o servidor (${url}). Verifique se o backend está rodando e o console para detalhes.`);
+                    console.error(`Falha na requisição para ${method} ${url}:`, error);
+                    alert("Erro de rede ou falha ao conectar com o servidor. Verifique o console para detalhes.");
                     return null; // Indica falha grave
                 }
             }
@@ -926,8 +899,8 @@
 
             function updateSummaryAndCounts() {
                 const cycle = appState.currentCycle;
-                // const earningsList = appState.earningsList; // Não usado diretamente aqui
-                // const expenseList = appState.expenseList; // Não usado diretamente aqui
+                const earningsList = appState.earningsList;
+                const expenseList = appState.expenseList;
 
                 const gasCost = cycle?.gas_cost || 0;
                 const cumulativeEarnings = cycle?.cumulative_earnings || 0;
@@ -1023,6 +996,7 @@
 
                     const deleteBtn = document.createElement('button');
                     deleteBtn.classList.add('action-btn', 'delete-btn');
+                    deleteBtn.innerHTML = '<i class="fa-solid fa-trash"></i>';
                     deleteBtn.setAttribute('data-tooltip', 'Excluir despesa');
                     deleteBtn.dataset.id = expense.id; // Usa o ID do banco
                     actionsCell.appendChild(deleteBtn);
@@ -1030,96 +1004,67 @@
                 toggleExpenseHistoryTable(isExpenseHistoryVisible, false); // Atualiza visibilidade sem salvar no localStorage
             }
 
-            // *** Função loadArchivedList com Listener de Clique Individual (com dataset.id no contentDiv) ***
             function loadArchivedList() {
                 archivedListDiv.innerHTML = '';
                 noArchivesMessage.style.display = appState.archives.length === 0 ? 'block' : 'none';
-
-                [...appState.archives].sort((a, b) => new Date(b.archiveDate) - new Date(a.archiveDate)).forEach((archive) => {
+                // Ordena pela data do arquivamento (já vem ordenado da API, mas seguro re-ordenar)
+                 [...appState.archives].sort((a, b) => new Date(b.archiveDate) - new Date(a.archiveDate)).forEach((archive) => {
                     const itemDiv = document.createElement('div');
                     itemDiv.classList.add('archive-item');
 
                     const deleteBtn = document.createElement('button');
                     deleteBtn.classList.add('delete-archive-btn');
                     deleteBtn.innerHTML = '<i class="fa-solid fa-trash-can"></i>';
-                    deleteBtn.setAttribute('data-tooltip', 'Excluir este arquivo permanentemente');
-                    const archiveIdForDelete = archive.db_id; // Captura o ID para o listener
-                    deleteBtn.dataset.id = archiveIdForDelete; // Adiciona ID ao botão
-                    // console.log(`Criando botão delete para archive ID: ${archiveIdForDelete}, Classe: ${deleteBtn.className}`); // Log para debug
-                    // Adiciona listener direto no botão
-                    deleteBtn.addEventListener('click', (event) => {
-                        event.stopPropagation(); // Previne borbulhamento para o contentDiv
-                        console.log("--> CLIQUE DIRETO NO BOTÃO DELETAR - ID:", archiveIdForDelete); // LOG
-                        if (!isNaN(archiveIdForDelete)) {
-                             handleDeleteArchive(archiveIdForDelete);
-                         } else {
-                             console.warn("Botão deletar clicado, mas ID inválido (listener direto):", archiveIdForDelete);
-                         }
-                    });
+                    deleteBtn.setAttribute('data-tooltip', 'Excluir arquivo');
+                    deleteBtn.dataset.id = archive.db_id; // Usa o ID do banco
                     itemDiv.appendChild(deleteBtn);
 
                     const contentDiv = document.createElement('div');
                     contentDiv.classList.add('archive-item-content');
-                    // *** CORREÇÃO: Adicionar dataset.id de volta ao contentDiv ***
-                    contentDiv.dataset.id = archive.db_id; // Adiciona ID ao contentDiv
-                     // *** FIM DA CORREÇÃO ***
-                    contentDiv.setAttribute('data-tooltip', 'Clique para ver detalhes');
+                    contentDiv.dataset.id = archive.db_id; // Usa o ID do banco para buscar detalhes
+                    contentDiv.setAttribute('data-tooltip', 'Ver detalhes');
                     contentDiv.style.cursor = 'pointer';
-                    const archiveIdForDetails = archive.db_id; // Captura o ID para o listener
-                     // Adiciona listener direto na área de conteúdo
-                    contentDiv.addEventListener('click', () => {
-                         console.log("--> CLIQUE DIRETO NA ÁREA DE CONTEÚDO - ID:", archiveIdForDetails); // LOG
-                         if (!isNaN(archiveIdForDetails)) {
-                             showArchiveDetails(archiveIdForDetails);
-                         } else {
-                              console.warn("Área de conteúdo clicada, mas ID inválido (listener direto):", archiveIdForDetails);
-                          }
-                    });
-
 
                     const isFullCycle = archive.archiveType === "Ciclo Completo";
-                    // ... (resto do código para montar o contentHTML continua igual) ...
-                     const archiveDate = formatDateTime(archive.archiveDate);
-                     const endDate = formatDateTime(archive.periodEndDate || archive.archiveDate);
-                     const earnings = parseArchivedValue(isFullCycle ? archive.cycleEarnings : archive.periodEarnings);
-                     const races = parseArchivedValue(isFullCycle ? archive.cycleRaceCount : archive.periodRaceCount);
-                     const gas = parseArchivedValue(isFullCycle ? archive.gasCost : archive.gasCostSnapshot);
-                     const profit = parseArchivedValue(isFullCycle ? archive.summary_profit : archive.cycleProfitSnapshot);
-                     const note = archive.note || '';
-                     const profitClass = profit >= 0 ? 'positive' : 'negative';
+                    const archiveDate = formatDateTime(archive.archiveDate);
+                    const endDate = formatDateTime(archive.periodEndDate || archive.archiveDate);
+                    const earnings = parseArchivedValue(isFullCycle ? archive.cycleEarnings : archive.periodEarnings);
+                    const races = parseArchivedValue(isFullCycle ? archive.cycleRaceCount : archive.periodRaceCount);
+                    const gas = parseArchivedValue(isFullCycle ? archive.gasCost : archive.gasCostSnapshot);
+                    const profit = parseArchivedValue(isFullCycle ? archive.summary_profit : archive.cycleProfitSnapshot);
+                    const note = archive.note || '';
+                    const profitClass = profit >= 0 ? 'positive' : 'negative';
 
-                     let contentHTML = `<p><strong><i class="fa-solid ${isFullCycle ? 'fa-calendar-check' : 'fa-calendar-day'}"></i> ${archive.archiveType}:</strong> ${archiveDate}</p>`;
-                     contentHTML += `<p><i class="fa-regular fa-clock"></i><strong>Fim:</strong> ${endDate}</p>`;
-                     contentHTML += `<p><i class="fa-solid fa-sack-dollar"></i><strong>Ganhos:</strong> ${formatCurrency(earnings)}</p>`;
-                     contentHTML += `<p><i class="fa-solid fa-route"></i><strong>Corridas:</strong> ${races}</p>`;
-                     contentHTML += `<p><i class="fa-solid fa-gas-pump"></i><strong>Gasolina:</strong> ${formatCurrency(gas)}</p>`;
+                    let contentHTML = `<p><strong><i class="fa-solid ${isFullCycle ? 'fa-calendar-check' : 'fa-calendar-day'}"></i> ${archive.archiveType}:</strong> ${archiveDate}</p>`;
+                    contentHTML += `<p><i class="fa-regular fa-clock"></i><strong>Fim:</strong> ${endDate}</p>`;
+                    contentHTML += `<p><i class="fa-solid fa-sack-dollar"></i><strong>Ganhos:</strong> ${formatCurrency(earnings)}</p>`;
+                    contentHTML += `<p><i class="fa-solid fa-route"></i><strong>Corridas:</strong> ${races}</p>`;
+                    contentHTML += `<p><i class="fa-solid fa-gas-pump"></i><strong>Gasolina:</strong> ${formatCurrency(gas)}</p>`;
 
-                     if (isFullCycle) {
-                         const otherExpenses = parseArchivedValue(archive.summary_totalOtherExpenses);
-                         const kmDriven = parseArchivedValue(archive.summary_kmDriven);
-                         const kmPerLiter = archive.summary_kmPerLiter || NA_DISPLAY;
-                         const costPerKm = archive.summary_costPerKm || NA_DISPLAY; // Já vem formatado do backend
-                         const startKm = parseArchivedValue(archive.startKM);
-                         const endKm = parseArchivedValue(archive.endKM);
-                         if (otherExpenses > 0) contentHTML += `<p><i class="fa-solid fa-receipt"></i><strong>Outras Desp.:</strong> ${formatCurrency(otherExpenses)}</p>`;
-                         if (kmDriven > 0) {
-                             contentHTML += `<p><i class="fa-solid fa-road"></i><strong>KM Rodados:</strong> ${kmDriven} KM (${startKm} - ${endKm})</p>`;
-                             if (kmPerLiter !== NA_DISPLAY) contentHTML += `<p><i class="fa-solid fa-ruler-combined"></i><strong>KM/L:</strong> ${kmPerLiter}</p>`; // Já formatado
-                             if (costPerKm !== NA_DISPLAY) contentHTML += `<p><i class="fa-solid fa-coins"></i><strong>Custo/KM:</strong> R$ ${costPerKm}</p>`; // Já formatado (adiciona R$)
-                         }
-                     }
-                     contentHTML += `<p><i class="fa-solid fa-chart-pie"></i><strong>Lucro ${isFullCycle ? 'Líquido' : '(Snap.)'}:</strong> <span class="profit-value ${profitClass}">${formatCurrency(profit)}</span></p>`;
-                     if (note) {
-                         contentHTML += `<p><i class="fa-solid fa-note-sticky"></i><strong>Nota:</strong><span class="archive-note">${note}</span></p>`;
-                     }
+                    if (isFullCycle) {
+                        const otherExpenses = parseArchivedValue(archive.summary_totalOtherExpenses);
+                        const kmDriven = parseArchivedValue(archive.summary_kmDriven);
+                        const kmPerLiter = archive.summary_kmPerLiter || NA_DISPLAY;
+                        const costPerKm = archive.summary_costPerKm || NA_DISPLAY; // Já vem formatado do backend
+                        const startKm = parseArchivedValue(archive.startKM);
+                        const endKm = parseArchivedValue(archive.endKM);
+                        if (otherExpenses > 0) contentHTML += `<p><i class="fa-solid fa-receipt"></i><strong>Outras Desp.:</strong> ${formatCurrency(otherExpenses)}</p>`;
+                        if (kmDriven > 0) {
+                            contentHTML += `<p><i class="fa-solid fa-road"></i><strong>KM Rodados:</strong> ${kmDriven} KM (${startKm} - ${endKm})</p>`;
+                            if (kmPerLiter !== NA_DISPLAY) contentHTML += `<p><i class="fa-solid fa-ruler-combined"></i><strong>KM/L:</strong> ${kmPerLiter}</p>`; // Já formatado
+                            if (costPerKm !== NA_DISPLAY) contentHTML += `<p><i class="fa-solid fa-coins"></i><strong>Custo/KM:</strong> R$ ${costPerKm}</p>`; // Já formatado (adiciona R$)
+                        }
+                    }
+                    contentHTML += `<p><i class="fa-solid fa-chart-pie"></i><strong>Lucro ${isFullCycle ? 'Líquido' : '(Snap.)'}:</strong> <span class="profit-value ${profitClass}">${formatCurrency(profit)}</span></p>`;
+                    if (note) {
+                        contentHTML += `<p><i class="fa-solid fa-note-sticky"></i><strong>Nota:</strong><span class="archive-note">${note}</span></p>`;
+                    }
                     contentDiv.innerHTML = contentHTML;
                     itemDiv.appendChild(contentDiv);
                     archivedListDiv.appendChild(itemDiv);
                 });
-                updateSimulatorState();
+                updateSimulatorState(); // Atualiza estado do simulador baseado nos arquivos
             }
-            // *** Fim da Função loadArchivedList Modificada ***
-
 
             function checkCycleStateAndToggleUI() {
                 const isCycleActive = appState.currentCycle?.is_active || false;
@@ -1620,7 +1565,7 @@
                 const entryToDelete = appState.earningsList.find(e => e.id === earningId);
                  if (!entryToDelete) return;
 
-                 if (confirm(`Excluir esta corrida?\n\nValor: ${formatCurrency(entryToDelete.amount)}\nData: ${formatDateTime(entryToDelete.timestamp)}`)) {
+                 if (confirm(`Excluir corrida?\nValor: ${formatCurrency(entryToDelete.amount)}\nData: ${formatDateTime(entryToDelete.timestamp)}`)) {
                     const result = await fetchApi(`/earnings/${earningId}`, 'DELETE');
                      if (result) {
                         appState = result; // API retorna estado atualizado
@@ -1635,14 +1580,14 @@
                  if (!entryToEdit) return;
 
                  const oldAmount = entryToEdit.amount;
-                 const newValueStr = prompt(`Editar valor da corrida:\n(Valor atual: ${formatCurrency(oldAmount)}, Data: ${formatDateTime(entryToEdit.timestamp)})`, oldAmount.toFixed(2).replace('.', ','));
+                 const newValueStr = prompt(`Editar valor da corrida:\n(Atual: ${formatCurrency(oldAmount)}, Data: ${formatDateTime(entryToEdit.timestamp)})`, oldAmount.toFixed(2).replace('.', ','));
                  if (newValueStr === null) return;
 
                  const newAmount = parseFloat(newValueStr.replace(',', '.'));
                  if (isNaN(newAmount) || newAmount < 0) {
                      alert("Valor inválido."); return;
                  }
-                 if (newAmount === oldAmount) { alert("Valor não alterado."); return; }
+                 if (newAmount === oldAmount) return;
 
                  const result = await fetchApi(`/earnings/${earningId}`, 'PUT', { amount: newAmount });
 
@@ -1678,10 +1623,10 @@
                 modalTitleSpan.textContent = `Detalhes: ${archive.archiveType} (${endDate})`;
 
                 let summaryHTML = `<p><strong>Tipo:</strong> ${archive.archiveType}</p>`;
-                summaryHTML += `<p><strong>Arquivado em:</strong> ${archiveDate}</p>`;
-                summaryHTML += `<p><strong>Período/Ciclo Encerrado em:</strong> ${endDate}</p>`;
-                summaryHTML += `<p><strong>${isFullCycle ? 'Ganhos Totais (Ciclo):' : 'Ganhos (Período):'}</strong> ${formatCurrency(earnings)}</p>`;
-                summaryHTML += `<p><strong>${isFullCycle ? 'Corridas Totais (Ciclo):' : 'Corridas (Período):'}</strong> ${races}</p>`;
+                summaryHTML += `<p><strong>Arquivado:</strong> ${archiveDate}</p>`;
+                summaryHTML += `<p><strong>Encerrado:</strong> ${endDate}</p>`;
+                summaryHTML += `<p><strong>${isFullCycle ? 'Ganhos Totais:' : 'Ganhos (Período):'}</strong> ${formatCurrency(earnings)}</p>`;
+                summaryHTML += `<p><strong>${isFullCycle ? 'Corridas Totais:' : 'Corridas (Período):'}</strong> ${races}</p>`;
                 summaryHTML += `<p><strong>Gasto Gasolina:</strong> ${formatCurrency(gas)}</p>`;
 
                 if (isFullCycle) {
@@ -1692,15 +1637,15 @@
                     const fuelPrice = parseArchivedValue(archive.fuelPricePerLiter);
                     const startKm = parseArchivedValue(archive.startKM);
                     const endKm = parseArchivedValue(archive.endKM);
-                    if (otherExpenses > 0) summaryHTML += `<p><strong>Outras Despesas (Total):</strong> ${formatCurrency(otherExpenses)}</p>`;
+                    if (otherExpenses > 0) summaryHTML += `<p><strong>Outras Despesas:</strong> ${formatCurrency(otherExpenses)}</p>`;
                     if (fuelPrice > 0) summaryHTML += `<p><strong>Preço Gasolina (L):</strong> ${formatCurrency(fuelPrice)}</p>`;
                     if (kmDriven > 0) {
-                        summaryHTML += `<p><strong>KM Rodados:</strong> ${kmDriven} KM (Inicial: ${startKm}, Final: ${endKm})</p>`;
-                        summaryHTML += `<p><strong>KM / Litro (Consumo):</strong> ${kmPerLiter}</p>`; // String N/A ou formatado
+                        summaryHTML += `<p><strong>KM Rodados:</strong> ${kmDriven} KM (${startKm} - ${endKm})</p>`;
+                        summaryHTML += `<p><strong>KM / Litro:</strong> ${kmPerLiter}</p>`; // String N/A ou formatado
                         summaryHTML += `<p><strong>Custo / KM:</strong> R$ ${costPerKm}</p>`; // String N/A ou formatado (adiciona R$)
                     }
                 }
-                summaryHTML += `<p><strong>${isFullCycle ? 'Lucro Líquido Final:' : 'Lucro Ciclo (Snapshot):'}</strong> <span class="profit-value ${profitClass}">${formatCurrency(profit)}</span></p>`;
+                summaryHTML += `<p><strong>${isFullCycle ? 'Lucro Líquido:' : 'Lucro Ciclo (Snap.):'}</strong> <span class="profit-value ${profitClass}">${formatCurrency(profit)}</span></p>`;
                 if (note) {
                     summaryHTML += `<p><strong>Nota:</strong><span class="modal-note">${note}</span></p>`;
                 }
@@ -1747,54 +1692,36 @@
                 currentArchiveIndex = -1; // Reseta o índice do modal
             }
 
-            // *** Função handleDeleteArchive com Logs Adicionais ***
             async function handleDeleteArchive(archiveId) {
-                 console.log(`[handleDeleteArchive] Iniciando para ID: ${archiveId}`); // LOG 1
                  const archiveToDelete = appState.archives.find(a => a.db_id === archiveId);
-
-                 if (!archiveToDelete) {
-                     console.error(`[handleDeleteArchive] ERRO: Arquivo com db_id ${archiveId} não encontrado no appState.archives.`); // LOG ERRO
-                     return;
-                 }
-                 console.log(`[handleDeleteArchive] Arquivo encontrado:`, archiveToDelete); // LOG 2
+                 if (!archiveToDelete) return;
 
                  const archiveDate = formatDateTime(archiveToDelete.archiveDate);
                  const archiveType = archiveToDelete.archiveType || '?';
-                 let confirmationMessage = `Excluir permanentemente o ${archiveType} de ${archiveDate}?\n\nEsta ação não pode ser desfeita.`;
+                 let confirmationMessage = `Excluir permanentemente ${archiveType} de ${archiveDate}?\n\nIrreversível.`;
 
                  // Aviso sobre não reajustar ciclo ativo (simplificação)
                  if (archiveToDelete.archiveType === "Período Parcial" && appState.currentCycle?.is_active) {
                      confirmationMessage += `\n\n(Nota: A exclusão deste arquivo NÃO reajustará os totais do ciclo atualmente ativo).`;
                  }
 
-                 console.log("[handleDeleteArchive] Mostrando confirmação..."); // LOG 3
-                 if (!confirm(confirmationMessage)) {
-                     console.log("[handleDeleteArchive] Exclusão cancelada pelo usuário."); // LOG 4
-                     return; // Se não confirmar, PARA AQUI.
-                 }
+                 if (!confirm(confirmationMessage)) return;
 
-                 console.log("[handleDeleteArchive] Usuário confirmou. Chamando API DELETE /archives/" + archiveId); // LOG 5
                  const result = await fetchApi(`/archives/${archiveId}`, 'DELETE');
 
                  if (result) {
-                     console.log("[handleDeleteArchive] API respondeu OK:", result); // LOG 6
                      appState.archives = result.archives; // API retorna a lista atualizada
                      updateUIFromState(); // Atualiza lista e gráfico
                      alert(result.message || "Arquivo excluído.");
                      if (currentArchiveIndex === archiveId) {
                         closeModal(); // Fecha o modal se o arquivo excluído estava aberto
                      }
-                 } else {
-                      console.error("[handleDeleteArchive] Falha na chamada API para deletar arquivo."); // LOG ERRO
                  }
-                 console.log(`[handleDeleteArchive] Finalizando para ID: ${archiveId}`); // LOG 7
             }
-            // *** Fim da Função handleDeleteArchive com Logs ***
-
 
             async function handleResetApplication() {
-                 if (!confirm("⚠️ ATENÇÃO! ⚠️\n\nTem certeza que deseja apagar TODOS os dados do SERVIDOR?\n\nEsta ação é IRREVERSÍVEL!")) { return; }
-                 if (!confirm("‼️ ÚLTIMA CHANCE! ‼️\n\nCONFIRMAR a exclusão total e permanente de todos os dados?")) { return; }
+                 if (!confirm("⚠️ ATENÇÃO! ⚠️\n\nApagar TODOS os dados do SERVIDOR?\n\nIRREVERSÍVEL!")) return;
+                 if (!confirm("‼️ ÚLTIMA CHANCE! ‼️\n\nCONFIRMAR exclusão total e permanente de TODOS os ciclos, corridas, despesas e arquivos?")) return;
 
                  // Chama a API de reset
                  const result = await fetchApi('/reset', 'POST');
@@ -1941,46 +1868,21 @@
                  }
              });
 
-             // *** Listener Corrigido (NOVA ABORDAGEM - DELEGAÇÃO REFINADA) ***
-             archivedListDiv.addEventListener('click', (event) => {
-                 console.log("Clique em archivedListDiv. Alvo:", event.target); // LOG
-
-                 // PRIORIDADE 1: O clique foi NO BOTÃO DELETAR ou seu ÍCONE?
+            archivedListDiv.addEventListener('click', (event) => {
                  const deleteButton = event.target.closest('.delete-archive-btn');
+                 const contentArea = event.target.closest('.archive-item-content');
                  if (deleteButton) {
-                     // Achou o botão subindo na árvore. Não importa se foi no ícone ou no botão.
-                     event.preventDefault();
-                     event.stopPropagation(); // Impedir que suba mais
-
                      const archiveId = parseInt(deleteButton.dataset.id, 10);
                      if (!isNaN(archiveId)) {
-                         console.log("--> DELEGADO: CLIQUE NO BOTÃO DELETAR - ID:", archiveId);
                          handleDeleteArchive(archiveId);
-                     } else {
-                         console.warn("--> DELEGADO: Botão deletar clicado, mas ID inválido:", deleteButton.dataset.id);
                      }
-                     return; // IMPORTANTE: Sai da função aqui para não processar como clique na área de conteúdo
-                 }
-
-                 // PRIORIDADE 2: Se NÃO foi no botão delete, foi na ÁREA DE CONTEÚDO?
-                 const contentArea = event.target.closest('.archive-item-content');
-                 if (contentArea) {
-                     // *** Garantir que pegamos o ID do dataset do contentArea ***
-                     const archiveId = parseInt(contentArea.dataset.id, 10); // Assumindo que o ID está no contentArea
+                 } else if (contentArea) {
+                     const archiveId = parseInt(contentArea.dataset.id, 10);
                      if (!isNaN(archiveId)) {
-                         console.log("--> DELEGADO: CLIQUE NA ÁREA DE CONTEÚDO - ID:", archiveId);
                          showArchiveDetails(archiveId);
-                     } else {
-                         console.warn("--> DELEGADO: Área de conteúdo clicada, mas ID inválido:", contentArea.dataset.id);
                      }
-                     return; // Sai da função
                  }
-
-                 // Se não foi em nenhum dos dois
-                 console.log("--> DELEGADO: Clique fora de área relevante.");
-            });
-            // *** Fim do Listener Corrigido ***
-
+             });
 
             modalCloseBtn.addEventListener('click', closeModal);
             window.addEventListener('click', (event) => { if (event.target == modal) { closeModal(); } });
